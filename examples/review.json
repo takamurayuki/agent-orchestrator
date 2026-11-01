@@ -1,0 +1,1 @@
+{"verdict":"changes_requested","findings":[{"id":"REV-001","severity":"high","file":"src/auth/login.ts","line":42,"description":"ログイン失敗時にユーザー存在を推測できる","evidence":"アカウント有無で異なるエラー文字列を返している","recommendation":"失敗時のメッセージを統一する"}],"requirementsUnverified":["ログアウト後のセッション無効化"],"summary":"エラー情報とセッション無効化の改善・検証が必要"}

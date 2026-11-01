@@ -1,0 +1,499 @@
+import {
+  isTerminalRunState,
+  type BuilderOutcome,
+  type DiffSummary,
+  type PolicyViolation,
+  type ResolvedTask,
+  type ReviewFinding,
+  type ReviewOutcome,
+  type RoundRecord,
+  type RunEvent,
+  type RunReasonCode,
+  type RunState,
+  type RunStatus,
+  type VerificationResult
+} from '@agent-orchestrator/contracts';
+import { evaluateCompletionGate, type GateResult } from './gate.js';
+import { checkDiffPolicy } from './policy.js';
+
+/**
+ * 実行状態機械（SPEC §6）。外部副作用はすべて EngineDeps 経由で注入し、単体テストではモックする。
+ *
+ * CREATED → PREFLIGHT → IMPLEMENTING → VERIFYING → REVIEWING → COMPLETED
+ *   - VERIFYING 失敗 → 次の IMPLEMENTING（残試行があれば）。レビューは実行しない
+ *   - REVIEWING changes_requested → 次の IMPLEMENTING（残試行があれば）
+ *   - REVIEWING unknown / JSON 不正 / 内容不整合 → NEEDS_HUMAN
+ *   - CLI 異常終了・ポリシー違反・修正上限・時間切れ → NEEDS_HUMAN（preflight 失敗は PRECHECK_FAILED）
+ *   - キャンセル → 子プロセス停止後 INTERRUPTED
+ *   - 予期しない例外 → INTERNAL_ERROR
+ */
+
+export interface ApprovedTaskSnapshot {
+  approvedTaskId: string;
+  task: ResolvedTask;
+  /** ユーザー承認済みフラグ（承認 API を通ったときだけ true） */
+  approved: boolean;
+  approvedAt: string | null;
+  taskYaml: string;
+}
+
+export interface PreflightCheck {
+  id: string;
+  label: string;
+  status: 'ok' | 'fail' | 'warn' | 'unverified';
+  detail: string;
+  fix: string | null;
+}
+export interface PreflightReport {
+  ok: boolean;
+  checks: PreflightCheck[];
+}
+
+export interface WorkspaceHandle {
+  path: string;
+  baseSha: string;
+}
+
+export interface DiffCapture {
+  summary: DiffSummary;
+  /** 全体の unified diff（未追跡ファイルも含む、サイズ上限で打ち切り） */
+  patch: string;
+  /** ファイルごとの patch（ポリシー検査用） */
+  patches: Record<string, string>;
+}
+
+export interface BuilderInput {
+  runId: string;
+  round: number;
+  workspace: WorkspaceHandle;
+  task: ResolvedTask;
+  taskYaml: string;
+  feedback: BuilderFeedback | null;
+  timeoutMs: number;
+  signal: AbortSignal;
+  onLog: (chunk: string) => void;
+}
+export interface BuilderFeedback {
+  previousRound: number;
+  verificationFailures: string[];
+  reviewFindings: ReviewFinding[];
+  requirementsUnverified: string[];
+  reviewSummary: string | null;
+}
+
+export interface VerifierInput {
+  runId: string;
+  round: number;
+  workspace: WorkspaceHandle;
+  profile: ResolvedTask['verificationProfile'];
+  timeoutMs: number;
+  signal: AbortSignal;
+  onLog: (chunk: string) => void;
+}
+
+export interface ReviewerInput {
+  runId: string;
+  round: number;
+  workspace: WorkspaceHandle;
+  task: ResolvedTask;
+  taskYaml: string;
+  diff: DiffCapture;
+  verification: VerificationResult;
+  timeoutMs: number;
+  signal: AbortSignal;
+  onLog: (chunk: string) => void;
+}
+
+export interface EngineDeps {
+  preflight(input: { task: ResolvedTask; signal: AbortSignal }): Promise<PreflightReport>;
+  workspace: {
+    resolveBaseSha(repository: string, baseRef: string): Promise<string>;
+    create(input: { runId: string; repository: string; baseSha: string }): Promise<WorkspaceHandle>;
+    captureDiff(workspace: WorkspaceHandle): Promise<DiffCapture>;
+    hash(workspace: WorkspaceHandle): Promise<string>;
+  };
+  builder: { implement(input: BuilderInput): Promise<BuilderOutcome> };
+  verifier: {
+    expectedCommands(profile: ResolvedTask['verificationProfile']): string[];
+    verify(input: VerifierInput): Promise<VerificationResult>;
+  };
+  reviewer: { review(input: ReviewerInput): Promise<ReviewOutcome> };
+  /** ホストのワークスペースと隔離実行環境（ボリューム）の同期。push: 作成直後、pull: Builder/Reviewer 実行後 */
+  transport: {
+    push(runId: string, workspace: WorkspaceHandle): Promise<void>;
+    pull(runId: string, workspace: WorkspaceHandle): Promise<void>;
+  };
+  recorder: RunRecorder;
+  /** 進行中 Run の有無（並行起動の禁止 EX-13）。engine 外の RunService が保証するが、二重防御として確認する */
+  hasActiveRun(exceptRunId: string): boolean;
+  now(): number;
+}
+
+/** 状態・イベント・成果物の永続化。SQLite + ファイル（runs/<runId>/...）。 */
+export interface RunRecorder {
+  createRun(status: RunStatus, snapshot: ApprovedTaskSnapshot): Promise<void>;
+  updateStatus(status: RunStatus): Promise<void>;
+  /** イベントを連番付きで永続化し、永続化後に返す */
+  appendEvent(event: Omit<RunEvent, 'sequence' | 'timestamp'>): Promise<RunEvent>;
+  saveRound(runId: string, round: RoundRecord): Promise<void>;
+  saveArtifact(runId: string, round: number, name: string, content: string): Promise<void>;
+  saveReport(runId: string, markdown: string): Promise<void>;
+  /** 永続化済みイベント数（完了ゲート 7） */
+  persistedEventCount(runId: string): Promise<number>;
+}
+
+export interface EngineRunInput {
+  runId: string;
+  snapshot: ApprovedTaskSnapshot;
+  runDir: string;
+  signal: AbortSignal;
+}
+
+export class RunCancelledError extends Error {
+  constructor() {
+    super('run cancelled');
+    this.name = 'RunCancelledError';
+  }
+}
+
+export const NEXT_ACTIONS: Record<RunReasonCode, string[]> = {
+  COMPLETED: ['worktree の差分を確認し、問題なければ手動で元ブランチへ取り込んでください（push/merge はツールが行いません）'],
+  MAX_ROUNDS: ['修正上限（3 回）に達しました。レポートの失敗理由と指摘を確認し、要件を見直すか手動で修正してください'],
+  REVIEW_UNKNOWN: ['Reviewer が判断不能（unknown）を返しました。差分を人間がレビューしてください'],
+  REVIEW_INVALID_JSON: ['Reviewer の出力が契約（review.schema.json）に適合しません。rounds/<n>/review.raw.txt を確認してください'],
+  REVIEW_INCONSISTENT: ['Reviewer の verdict と指摘が矛盾しています。指摘内容を人間が確認してください'],
+  BUILDER_FAILED: ['Builder（Claude Code）が異常終了しました。rounds/<n>/builder.log を確認し、認証・通信・権限を確認してください'],
+  BUILDER_TIMEOUT: ['Builder がタイムアウトしました。cliTimeoutSeconds の見直し、またはタスクの分割を検討してください'],
+  NO_CHANGES: ['Builder が変更を生成しませんでした。要件が既に満たされているか、依頼内容が不明確な可能性があります'],
+  POLICY_VIOLATION: ['差分にポリシー違反（テスト削除・skip、検証設定の弱体化、禁止パス）があります。差分を確認し、手動で修正してください'],
+  WORKSPACE_MODIFIED_DURING_REVIEW: ['レビュー中に worktree が変更されました。Reviewer の read-only 隔離を確認してください'],
+  TIMEOUT: ['maxDurationSeconds を超過しました。途中成果は worktree に残っています'],
+  GATE_FAILED: ['完了ゲートを満たしていません。レポートのゲート失敗一覧を確認してください'],
+  PRECHECK_FAILED: ['起動前検査に失敗しました。各チェックの修正方法に従って環境を整えてから再実行してください'],
+  TASK_NOT_APPROVED: ['タスクが承認されていません。承認画面で内容を確認し承認してください'],
+  CANCELLED: ['ユーザーがキャンセルしました。途中成果は worktree に残っています'],
+  RECOVERED_AFTER_RESTART: ['アプリ再起動時に実行中だったため中断扱いにしました。worktree を確認し、必要なら新しい Run を開始してください'],
+  INTERNAL_ERROR: ['内部エラーです。runs/<runId>/events.jsonl と status.json を確認してください']
+};
+
+export class RunEngine {
+  constructor(private readonly deps: EngineDeps) {}
+
+  async run(input: EngineRunInput): Promise<RunStatus> {
+    const { runId, snapshot, signal } = input;
+    const task = snapshot.task;
+    const startedMs = this.deps.now();
+    const deadlineMs = startedMs + task.limits.maxDurationSeconds * 1000;
+    let lastSequence = 0;
+    let workspace: WorkspaceHandle | null = null;
+    let status: RunStatus = {
+      runId,
+      approvedTaskId: snapshot.approvedTaskId,
+      taskId: task.id,
+      taskTitle: task.title,
+      repository: task.repository,
+      baseRef: task.baseRef,
+      baseSha: null,
+      state: 'CREATED',
+      reasonCode: null,
+      reasonDetail: null,
+      currentRound: 0,
+      maxRounds: task.limits.maxImplementationAttempts,
+      worktreePath: null,
+      runDir: input.runDir,
+      startedAt: new Date(startedMs).toISOString(),
+      finishedAt: null,
+      lastSequence: 0,
+      openBlockingFindings: 0,
+      nextActions: []
+    };
+    const rounds: RoundRecord[] = [];
+
+    const emit = async (type: string, payload: Record<string, unknown>, round: number | null = null) => {
+      const ev = await this.deps.recorder.appendEvent({ runId, type, round, payload });
+      lastSequence = ev.sequence;
+      status = { ...status, lastSequence };
+      return ev;
+    };
+    const transition = async (state: RunState, extra: Partial<RunStatus> = {}) => {
+      const from = status.state;
+      status = { ...status, ...extra, state };
+      await emit('run.state_changed', { from, to: state, ...(extra.reasonCode ? { reasonCode: extra.reasonCode, reasonDetail: extra.reasonDetail ?? null } : {}) }, status.currentRound || null);
+      await this.deps.recorder.updateStatus(status);
+    };
+    const finish = async (state: RunState, reasonCode: RunReasonCode, reasonDetail: string, extra: Partial<RunStatus> = {}) => {
+      await transition(state, {
+        reasonCode,
+        reasonDetail,
+        finishedAt: new Date(this.deps.now()).toISOString(),
+        nextActions: NEXT_ACTIONS[reasonCode],
+        ...extra
+      });
+      await emit('run.finished', { state, reasonCode, reasonDetail });
+      await this.deps.recorder.updateStatus(status);
+      return status;
+    };
+    const checkCancelled = () => {
+      if (signal.aborted) throw new RunCancelledError();
+    };
+    const withinTime = () => this.deps.now() <= deadlineMs;
+    const remainingMs = () => Math.max(0, deadlineMs - this.deps.now());
+
+    try {
+      await this.deps.recorder.createRun(status, snapshot);
+      await emit('run.created', { taskId: task.id, approvedTaskId: snapshot.approvedTaskId, maxRounds: task.limits.maxImplementationAttempts });
+
+      // 承認されていないスナップショットは決して実行しない（RA-11, RA-12）
+      if (!snapshot.approved || !snapshot.approvedAt) {
+        return await finish('NEEDS_HUMAN', 'TASK_NOT_APPROVED', 'task snapshot がユーザー承認済みではない');
+      }
+      if (this.deps.hasActiveRun(runId)) {
+        return await finish('NEEDS_HUMAN', 'INTERNAL_ERROR', '別の Run が進行中のため起動を拒否');
+      }
+
+      // ---- PREFLIGHT ----
+      await transition('PREFLIGHT');
+      checkCancelled();
+      const preflight = await this.deps.preflight({ task, signal });
+      for (const c of preflight.checks) await emit('preflight.check', { ...c });
+      await emit('preflight.completed', { ok: preflight.ok, failed: preflight.checks.filter((c) => c.status === 'fail').map((c) => c.id) });
+      if (!preflight.ok) {
+        const failed = preflight.checks.filter((c) => c.status === 'fail' || c.status === 'unverified');
+        return await finish('PRECHECK_FAILED', 'PRECHECK_FAILED', failed.map((c) => `${c.id}: ${c.detail}`).join('; '));
+      }
+      checkCancelled();
+
+      const baseSha = await this.deps.workspace.resolveBaseSha(task.repository, task.baseRef);
+      status = { ...status, baseSha };
+      workspace = await this.deps.workspace.create({ runId, repository: task.repository, baseSha });
+      status = { ...status, worktreePath: workspace.path };
+      await this.deps.recorder.updateStatus(status);
+      await emit('workspace.created', { path: workspace.path, baseSha });
+      await this.deps.transport.push(runId, workspace);
+      await emit('workspace.synced', { direction: 'push' });
+
+      let feedback: BuilderFeedback | null = null;
+      const maxRounds = task.limits.maxImplementationAttempts;
+
+      for (let round = 1; round <= maxRounds; round++) {
+        checkCancelled();
+        if (!withinTime()) return await finish('NEEDS_HUMAN', 'TIMEOUT', `maxDurationSeconds(${task.limits.maxDurationSeconds}) を超過`);
+        const record: RoundRecord = {
+          round,
+          builder: null,
+          diff: null,
+          policyViolations: [],
+          verification: null,
+          review: null,
+          workspaceHashBeforeReview: null,
+          workspaceHashAfterReview: null,
+          startedAt: new Date(this.deps.now()).toISOString(),
+          finishedAt: null
+        };
+        rounds.push(record);
+        status = { ...status, currentRound: round };
+        await emit('round.started', { round, maxRounds, hasFeedback: feedback !== null }, round);
+
+        // ---- IMPLEMENTING ----
+        await transition('IMPLEMENTING');
+        await emit('builder.started', { round }, round);
+        const builderLog: string[] = [];
+        const builder = await this.deps.builder.implement({
+          runId,
+          round,
+          workspace,
+          task,
+          taskYaml: snapshot.taskYaml,
+          feedback,
+          timeoutMs: Math.min(task.limits.cliTimeoutSeconds * 1000, remainingMs()),
+          signal,
+          onLog: (c) => builderLog.push(c)
+        });
+        record.builder = builder;
+        await this.deps.recorder.saveArtifact(runId, round, 'builder.log', builderLog.join(''));
+        await this.deps.transport.pull(runId, workspace);
+        await emit('workspace.synced', { direction: 'pull', after: 'builder' }, round);
+        await emit('builder.finished', { round, exitCode: builder.exitCode, timedOut: builder.timedOut, isError: builder.isError, durationMs: builder.durationMs }, round);
+        checkCancelled();
+        if (builder.timedOut) {
+          record.finishedAt = new Date(this.deps.now()).toISOString();
+          await this.deps.recorder.saveRound(runId, record);
+          return await finish('NEEDS_HUMAN', 'BUILDER_TIMEOUT', `round ${round}: Builder がタイムアウト`);
+        }
+        if (builder.exitCode !== 0 || builder.isError) {
+          record.finishedAt = new Date(this.deps.now()).toISOString();
+          await this.deps.recorder.saveRound(runId, record);
+          return await finish('NEEDS_HUMAN', 'BUILDER_FAILED', `round ${round}: Builder 終了コード ${builder.exitCode ?? 'null'}${builder.isError ? '（is_error）' : ''}`);
+        }
+
+        // ---- diff & policy ----
+        const diff = await this.deps.workspace.captureDiff(workspace);
+        record.diff = diff.summary;
+        await this.deps.recorder.saveArtifact(runId, round, 'diff.patch', diff.patch);
+        await emit('diff.captured', { round, files: diff.summary.files.length, isEmpty: diff.summary.isEmpty, truncated: diff.summary.truncated }, round);
+        if (diff.summary.isEmpty) {
+          record.finishedAt = new Date(this.deps.now()).toISOString();
+          await this.deps.recorder.saveRound(runId, record);
+          return await finish('NEEDS_HUMAN', 'NO_CHANGES', `round ${round}: Builder が変更を生成しなかった`);
+        }
+        const violations: PolicyViolation[] = checkDiffPolicy({ files: diff.summary.files, patches: diff.patches });
+        record.policyViolations = violations;
+        await emit('policy.checked', { round, violations: violations.length, codes: violations.map((v) => v.code) }, round);
+        if (violations.length > 0) {
+          record.finishedAt = new Date(this.deps.now()).toISOString();
+          await this.deps.recorder.saveRound(runId, record);
+          return await finish('NEEDS_HUMAN', 'POLICY_VIOLATION', violations.map((v) => `${v.code} ${v.file}`).join('; '));
+        }
+
+        // ---- VERIFYING ----
+        checkCancelled();
+        if (!withinTime()) return await finish('NEEDS_HUMAN', 'TIMEOUT', `maxDurationSeconds(${task.limits.maxDurationSeconds}) を超過`);
+        await transition('VERIFYING');
+        await emit('verify.started', { round, profile: task.verificationProfile }, round);
+        const verifyLog: string[] = [];
+        const verification = await this.deps.verifier.verify({
+          runId,
+          round,
+          workspace,
+          profile: task.verificationProfile,
+          timeoutMs: Math.min(task.limits.verificationTimeoutSeconds * 1000, remainingMs()),
+          signal,
+          onLog: (c) => verifyLog.push(c)
+        });
+        record.verification = verification;
+        await this.deps.recorder.saveArtifact(runId, round, 'verify.json', JSON.stringify(verification, null, 2));
+        await this.deps.recorder.saveArtifact(runId, round, 'verify.log', verifyLog.join(''));
+        for (const c of verification.commands) await emit('verify.command', { round, name: c.name, exitCode: c.exitCode, timedOut: c.timedOut, durationMs: c.durationMs }, round);
+        await emit('verify.finished', { round, passed: verification.passed, missing: verification.missing }, round);
+        checkCancelled();
+        if (!verification.passed) {
+          record.finishedAt = new Date(this.deps.now()).toISOString();
+          await this.deps.recorder.saveRound(runId, record);
+          if (round >= maxRounds) {
+            return await finish('NEEDS_HUMAN', 'MAX_ROUNDS', `round ${round}: 検証失敗、修正上限に到達`);
+          }
+          feedback = {
+            previousRound: round,
+            verificationFailures: verification.commands
+              .filter((c) => c.exitCode !== 0 || c.timedOut)
+              .map((c) => `${c.name}: exit=${c.exitCode ?? 'null'}${c.timedOut ? ' (timeout)' : ''}\n${c.stderrExcerpt || c.stdoutExcerpt}`),
+            reviewFindings: [],
+            requirementsUnverified: [],
+            reviewSummary: null
+          };
+          continue; // レビューは実行しない
+        }
+
+        // ---- REVIEWING ----
+        if (!withinTime()) return await finish('NEEDS_HUMAN', 'TIMEOUT', `maxDurationSeconds(${task.limits.maxDurationSeconds}) を超過`);
+        await transition('REVIEWING');
+        record.workspaceHashBeforeReview = await this.deps.workspace.hash(workspace);
+        await emit('review.started', { round, workspaceHash: record.workspaceHashBeforeReview }, round);
+        const reviewLog: string[] = [];
+        const review = await this.deps.reviewer.review({
+          runId,
+          round,
+          workspace,
+          task,
+          taskYaml: snapshot.taskYaml,
+          diff,
+          verification,
+          timeoutMs: Math.min(task.limits.cliTimeoutSeconds * 1000, remainingMs()),
+          signal,
+          onLog: (c) => reviewLog.push(c)
+        });
+        record.review = review;
+        await this.deps.transport.pull(runId, workspace);
+        record.workspaceHashAfterReview = await this.deps.workspace.hash(workspace);
+        await this.deps.recorder.saveArtifact(runId, round, 'review.json', JSON.stringify(review.parsed ?? { invalid: true, parseError: review.parseError }, null, 2));
+        await this.deps.recorder.saveArtifact(runId, round, 'review.raw.txt', review.rawExcerpt);
+        await this.deps.recorder.saveArtifact(runId, round, 'review.log', reviewLog.join(''));
+        await emit(
+          'review.finished',
+          {
+            round,
+            verdict: review.parsed?.verdict ?? null,
+            findings: review.parsed?.findings.length ?? 0,
+            parseError: review.parseError,
+            timedOut: review.timedOut,
+            workspaceHashMatch: record.workspaceHashBeforeReview === record.workspaceHashAfterReview
+          },
+          round
+        );
+        checkCancelled();
+        record.finishedAt = new Date(this.deps.now()).toISOString();
+        await this.deps.recorder.saveRound(runId, record);
+
+        if (record.workspaceHashBeforeReview !== record.workspaceHashAfterReview) {
+          return await finish('NEEDS_HUMAN', 'WORKSPACE_MODIFIED_DURING_REVIEW', `round ${round}: レビュー前後でワークスペースハッシュが不一致`);
+        }
+        if (review.timedOut) {
+          return await finish('NEEDS_HUMAN', 'REVIEW_UNKNOWN', `round ${round}: Reviewer がタイムアウト`);
+        }
+        if (!review.parsed) {
+          return await finish('NEEDS_HUMAN', 'REVIEW_INVALID_JSON', `round ${round}: ${review.parseError ?? 'レビュー JSON 不正'}`);
+        }
+        const blockingSeverities = task.review.blockingSeverities;
+        const blocking = review.parsed.findings.filter((f) => blockingSeverities.includes(f.severity));
+        status = { ...status, openBlockingFindings: blocking.length };
+
+        if (review.parsed.verdict === 'unknown') {
+          return await finish('NEEDS_HUMAN', 'REVIEW_UNKNOWN', `round ${round}: Reviewer verdict=unknown`);
+        }
+        if (review.parsed.verdict === 'approved') {
+          const persisted = await this.deps.recorder.persistedEventCount(runId);
+          const gate: GateResult = evaluateCompletionGate({
+            taskApproved: snapshot.approved,
+            verification,
+            expectedVerificationCommands: this.deps.verifier.expectedCommands(task.verificationProfile),
+            diff: diff.summary,
+            review,
+            blockingSeverities,
+            workspaceHashBeforeReview: record.workspaceHashBeforeReview,
+            workspaceHashAfterReview: record.workspaceHashAfterReview,
+            withinTimeLimit: withinTime(),
+            policyViolations: violations,
+            allEventsPersisted: persisted >= lastSequence
+          });
+          await emit('gate.evaluated', { round, passed: gate.passed, failures: gate.failures }, round);
+          if (gate.passed) {
+            return await finish('COMPLETED', 'COMPLETED', `round ${round}: すべての完了ゲートを通過`);
+          }
+          const inconsistent = gate.failures.some((f) => f.code === 'REVIEW_INCONSISTENT' || f.code === 'BLOCKING_FINDINGS' || f.code === 'REQUIREMENTS_UNVERIFIED');
+          return await finish('NEEDS_HUMAN', inconsistent ? 'REVIEW_INCONSISTENT' : 'GATE_FAILED', gate.failures.map((f) => `G${f.gate} ${f.code}: ${f.detail}`).join('; '));
+        }
+        // changes_requested
+        if (round >= maxRounds) {
+          return await finish('NEEDS_HUMAN', 'MAX_ROUNDS', `round ${round}: レビュー changes_requested、修正上限に到達`);
+        }
+        feedback = {
+          previousRound: round,
+          verificationFailures: [],
+          reviewFindings: review.parsed.findings,
+          requirementsUnverified: review.parsed.requirementsUnverified,
+          reviewSummary: review.parsed.summary
+        };
+      }
+      // ループを抜けるのは maxRounds=0 のような異常時のみ
+      return await finish('NEEDS_HUMAN', 'MAX_ROUNDS', '修正上限に到達');
+    } catch (err) {
+      if (err instanceof RunCancelledError || signal.aborted) {
+        try {
+          return await finish('INTERRUPTED', 'CANCELLED', 'ユーザーによるキャンセル');
+        } catch {
+          return { ...status, state: 'INTERRUPTED', reasonCode: 'CANCELLED', reasonDetail: 'ユーザーによるキャンセル', nextActions: NEXT_ACTIONS.CANCELLED };
+        }
+      }
+      const message = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+      try {
+        return await finish('INTERNAL_ERROR', 'INTERNAL_ERROR', message);
+      } catch {
+        return { ...status, state: 'INTERNAL_ERROR', reasonCode: 'INTERNAL_ERROR', reasonDetail: message, nextActions: NEXT_ACTIONS.INTERNAL_ERROR };
+      }
+    } finally {
+      if (!isTerminalRunState(status.state)) {
+        // ここに来るのは finish が例外を投げたときだけ。状態は呼び出し側が INTERNAL_ERROR として扱う
+      }
+    }
+  }
+}

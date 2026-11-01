@@ -1,0 +1,80 @@
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { checkProfileReadiness, expectedCommandNames } from '../../src/verification/profiles.js';
+import { SandboxVerifier } from '../../src/verification/runner.js';
+import { FakeSandbox } from '../helpers/fake-sandbox.js';
+
+let dir: string;
+beforeEach(() => {
+  dir = mkdtempSync(join(tmpdir(), 'ao-verify-'));
+});
+afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+describe('verification profile readiness (SPEC §7)', () => {
+  it('reports missing scripts and lockfile', () => {
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ scripts: { test: 'vitest' } }));
+    const r = checkProfileReadiness(dir, 'node-pnpm');
+    expect(r.ready).toBe(false);
+    expect(r.missingScripts).toEqual(['typecheck', 'lint', 'test:run']);
+  });
+
+  it('is ready when typecheck/lint/test:run and pnpm-lock.yaml exist', () => {
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ scripts: { typecheck: 'tsc', lint: 'eslint .', 'test:run': 'vitest run' } }));
+    writeFileSync(join(dir, 'pnpm-lock.yaml'), 'lockfileVersion: 9\n');
+    expect(checkProfileReadiness(dir, 'node-pnpm').ready).toBe(true);
+  });
+
+  it('requires pnpm-lock.yaml', () => {
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ scripts: { typecheck: 'tsc', lint: 'eslint .', 'test:run': 'vitest run' } }));
+    const r = checkProfileReadiness(dir, 'node-pnpm');
+    expect(r.ready).toBe(false);
+    expect(r.detail).toContain('pnpm-lock.yaml');
+  });
+
+  it('only exposes predefined commands (no shell from YAML) [SEC-07]', () => {
+    expect(expectedCommandNames('node-pnpm')).toEqual(['install', 'typecheck', 'lint', 'test:run']);
+  });
+});
+
+describe('SandboxVerifier', () => {
+  const input = (sandbox: FakeSandbox) => ({
+    runId: 'R1',
+    round: 1,
+    workspace: { path: '/ws', baseSha: 'a'.repeat(40) },
+    profile: 'node-pnpm' as const,
+    timeoutMs: 1000,
+    signal: new AbortController().signal,
+    onLog: () => undefined,
+    sandbox
+  });
+
+  it('runs all commands in the sandbox sequentially and passes when all exit 0', async () => {
+    const sandbox = new FakeSandbox();
+    const result = await new SandboxVerifier(sandbox).verify(input(sandbox));
+    expect(result.passed).toBe(true);
+    expect(result.commands.map((c) => c.name)).toEqual(['install', 'typecheck', 'lint', 'test:run']);
+    expect(sandbox.steps.map((s) => s.argv[0])).toEqual(['pnpm', 'pnpm', 'pnpm', 'pnpm']);
+    // install だけ egress、他はネットワークなし
+    expect(sandbox.steps.map((s) => s.network)).toEqual(['egress', 'none', 'none', 'none']);
+    // ワークスペースは /workspace に rw mount
+    expect(sandbox.steps[0]?.workspace).toBe('rw');
+  });
+
+  it('stops at the first failure and records remaining as missing', async () => {
+    const sandbox = new FakeSandbox((step) => (step.argv.includes('typecheck') ? { exitCode: 2, stderr: 'TS2322' } : {}));
+    const result = await new SandboxVerifier(sandbox).verify(input(sandbox));
+    expect(result.passed).toBe(false);
+    expect(result.commands.map((c) => c.exitCode)).toEqual([0, 2]);
+    expect(result.missing).toEqual(['lint', 'test:run']);
+    expect(result.commands[1]?.stderrExcerpt).toContain('TS2322');
+  });
+
+  it('EX-08: records timeouts as timedOut with null exit code', async () => {
+    const sandbox = new FakeSandbox((step) => (step.argv.includes('test:run') ? { timedOut: true, exitCode: 137 } : {}));
+    const result = await new SandboxVerifier(sandbox).verify(input(sandbox));
+    expect(result.passed).toBe(false);
+    expect(result.commands[3]).toMatchObject({ name: 'test:run', timedOut: true, exitCode: null });
+  });
+});

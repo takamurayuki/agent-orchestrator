@@ -1,0 +1,29 @@
+{
+  "name": "@agent-orchestrator/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./schemas/*": "./schemas/*"
+  },
+  "files": [
+    "dist",
+    "schemas"
+  ],
+  "scripts": {
+    "build": "node scripts/gen-schemas.mjs && tsc -p tsconfig.json",
+    "typecheck": "node scripts/gen-schemas.mjs && tsc -p tsconfig.json --noEmit",
+    "gen:schemas": "node scripts/gen-schemas.mjs"
+  },
+  "dependencies": {
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1",
+    "zod": "^4.6.7"
+  }
+}

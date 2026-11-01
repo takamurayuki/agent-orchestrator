@@ -1,0 +1,21 @@
+node_modules/
+dist/
+build/
+*.log
+.DS_Store
+app-data/
+.app-data/
+coverage/
+apps/desktop/src-tauri/target/
+apps/desktop/src-tauri/gen/
+apps/desktop/src-tauri/binaries/
+# 実行結果は追跡しない（LIVE の実測結果だけは受入レポートの入力として残す）
+test-results/*
+!test-results/live.json
+playwright-report/
+*.tsbuildinfo
+.tmp/
+# env -i で起動した Windows プロセスが作る展開されない環境変数名のディレクトリ
+%SystemDrive%/
+# 配布サイドカー（SEA、95MB）はビルド生成物
+apps/desktop/src-tauri/binaries/*.exe

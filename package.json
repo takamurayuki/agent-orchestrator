@@ -1,0 +1,39 @@
+{
+  "name": "agent-orchestrator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.9.1",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "build": "pnpm -r --filter ./packages/* --filter ./apps/runner run build",
+    "typecheck": "pnpm -r run typecheck",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:run": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "pnpm --filter @agent-orchestrator/desktop run test:e2e",
+    "acceptance": "node scripts/acceptance-report.mjs",
+    "runner": "node apps/runner/dist/main.js",
+    "runner:dev": "tsx apps/runner/src/main.ts",
+    "sandbox:build": "node scripts/build-images.mjs",
+    "runner:check": "node apps/runner/dist/main.js --check",
+    "test:docker": "vitest run tests/integration/docker-sandbox.test.ts",
+    "fixture:sample": "node tests/fixtures/make-sample-repo.mjs"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.0",
+    "@types/node": "^22.20.5",
+    "esbuild": "0.28.2",
+    "eslint": "^9.39.0",
+    "globals": "^16.0.0",
+    "postject": "1.0.0-alpha.6",
+    "tsx": "^4.23.15",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.72.1",
+    "vitest": "^4.1.12",
+    "yaml": "^2.9.1"
+  }
+}

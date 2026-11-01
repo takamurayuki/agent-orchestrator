@@ -1,0 +1,1 @@
+{"facts":[{"key":"framework","value":"Svelte 5","source":"package.json","confidence":"confirmed"}],"questions":[{"id":"Q-001","question":"新規ユーザー登録も今回の対象に含めますか？","decisionImpact":"blocking","options":[{"value":"no","label":"ログインのみ"},{"value":"yes","label":"登録も含める"}],"recommendation":"まずログインのみを実装するとスコープを限定できます"}],"blockingQuestions":["Q-001"],"summary":"メール・パスワードログイン。登録の範囲は未確定。"}

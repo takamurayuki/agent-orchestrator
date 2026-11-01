@@ -1,0 +1,5 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": { "noEmit": true, "types": ["node"], "allowImportingTsExtensions": false },
+  "include": ["packages/*/test/**/*.ts", "apps/runner/test/**/*.ts", "tests/**/*.ts", "scripts/**/*.ts", "vitest.config.ts", "eslint.config.js"]
+}

@@ -1,0 +1,25 @@
+schemaVersion: 2
+id: TASK-LOGIN-001
+title: メールアドレスとパスワードでのログイン
+repository: /home/user/projects/web-app
+baseRef: develop
+requirements:
+  - メールアドレスとパスワードで認証する
+  - ログアウト時にセッションを無効化する
+acceptanceCriteria:
+  - id: AC-001
+    given: 有効なユーザーが存在する
+    when: 正しい認証情報でログインする
+    then: 認証済みセッションが確立する
+  - id: AC-002
+    given: 未認証ユーザーである
+    when: 保護された画面にアクセスする
+    then: アクセスが拒否される
+verificationProfile: node-pnpm
+limits:
+  maxImplementationAttempts: 3
+  maxDurationSeconds: 2700
+  cliTimeoutSeconds: 900
+  verificationTimeoutSeconds: 300
+review:
+  blockingSeverities: [critical, high]

@@ -1,0 +1,315 @@
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import type { AskedQuestion, DraftApproveResult, DraftState, DraftView, Fact, ProjectInfo, TaskProposal } from '@agent-orchestrator/contracts';
+import { nowIso } from '../config.js';
+import { detectProhibitedOperations } from '../policy.js';
+import type { Repository, DraftRow } from '../storage/repository.js';
+import { checkProfileReadiness } from '../verification/profiles.js';
+import { analyzeGap, validateProposal, type InterviewModel } from './gap-analyzer.js';
+import { previousAnsweredRound, validateAnswers, type AnswerInput } from './questions.js';
+import { renderDigest, type RepoDigest, type RepoInspector } from './repo-inspector.js';
+import { generateTask, parseAndValidateTaskYaml } from './task-generator.js';
+
+/**
+ * Requirements Agent の会話状態機械（SPEC §5）。
+ * DRAFT_CREATED → REPO_ANALYZING → GAP_ANALYZING → ASKING ↔ ANSWERING → SUMMARY_READY → AWAITING_APPROVAL → APPROVED → YAML_VALIDATED → READY_TO_RUN
+ * - 調査/モデル出力の失敗 → BLOCKED（推測で確定しない）
+ * - 要件編集 → 新 revision、承認フラグをリセット
+ * - 承認済み revision は immutable。Run に渡るのは approved_tasks のスナップショットだけ
+ */
+export class DraftServiceError extends Error {
+  constructor(
+    readonly code: 'NOT_FOUND' | 'INVALID_STATE' | 'INVALID_PARAMS' | 'DRAFT_BLOCKED' | 'VALIDATION_FAILED' | 'POLICY_REJECTED',
+    message: string
+  ) {
+    super(message);
+    this.name = 'DraftServiceError';
+  }
+}
+
+export interface DraftServiceDeps {
+  repo: Repository;
+  inspector: RepoInspector;
+  model: InterviewModel;
+  tasksDir: string;
+  onDraftUpdated?: (view: DraftView) => void;
+}
+
+interface DraftContext {
+  digest: RepoDigest;
+  info: ProjectInfo;
+}
+
+export class DraftService {
+  /** ダイジェストはメモリに保持（SQLite には facts と Q/A だけ保存）。再起動後は再調査する */
+  private readonly contexts = new Map<string, DraftContext>();
+
+  constructor(private readonly deps: DraftServiceDeps) {}
+
+  // ---- public API ----
+
+  async create(input: { projectPath: string; request: string; signal?: AbortSignal }): Promise<DraftView> {
+    const signal = input.signal ?? new AbortController().signal;
+    const prohibited = detectProhibitedOperations(input.request).map((p) => `${p.code}: ${p.guidance}`);
+    const inspection = await this.deps.inspector.inspect(input.projectPath);
+    const project = this.deps.repo.upsertProject(inspection.info.path, inspection.info);
+    let draft = this.deps.repo.createDraft(project.id, input.request, prohibited);
+    draft = this.deps.repo.updateDraft(draft.id, { state: 'REPO_ANALYZING' });
+    if (!inspection.ok) {
+      draft = this.deps.repo.updateDraft(draft.id, { state: 'BLOCKED', blockedReason: `リポジトリを調査できません（${inspection.code}）: ${inspection.message}` });
+      return this.emit(this.view(draft));
+    }
+    this.contexts.set(draft.id, { digest: inspection.digest, info: inspection.info });
+    draft = this.deps.repo.updateDraft(draft.id, { facts: inspection.facts, state: 'GAP_ANALYZING' });
+    this.emit(this.view(draft));
+    return this.emit(await this.runRound(draft, 1, signal));
+  }
+
+  async answer(input: { draftId: string; answers?: AnswerInput[]; back?: boolean; signal?: AbortSignal }): Promise<DraftView> {
+    const signal = input.signal ?? new AbortController().signal;
+    let draft = this.getDraftOrThrow(input.draftId);
+    if (input.back) return this.emit(await this.back(draft, signal));
+    if (draft.state !== 'ASKING') throw new DraftServiceError('INVALID_STATE', `状態 ${draft.state} では回答できません`);
+    const current = this.currentQuestions(draft);
+    const validated = validateAnswers(current, input.answers ?? [], draft.round, nowIso());
+    if (!validated.ok) throw new DraftServiceError('INVALID_PARAMS', validated.error);
+    draft = this.deps.repo.updateDraft(draft.id, { state: 'ANSWERING' });
+    this.deps.repo.addAnswers(draft.id, validated.answers);
+    if (validated.skippedBlocking.length > 0) {
+      // 安全性に重要な未確定項目のスキップは許可するが次へ進めない（SPEC §3.1-3）
+      draft = this.deps.repo.updateDraft(draft.id, {
+        state: 'BLOCKED',
+        blockedReason: `blocking の質問がスキップされました: ${validated.skippedBlocking.map((q) => `${q.id}「${q.question}」`).join('、')}。「戻る」で回答してください。`
+      });
+      return this.emit(this.view(draft));
+    }
+    return this.emit(await this.runRound(draft, draft.round + 1, signal));
+  }
+
+  async revise(input: { draftId: string; edits: Partial<Pick<TaskProposal, 'title' | 'requirements' | 'outOfScope' | 'acceptanceCriteria' | 'approach'>> }): Promise<DraftView> {
+    let draft = this.getDraftOrThrow(input.draftId);
+    if (!['SUMMARY_READY', 'AWAITING_APPROVAL', 'APPROVED', 'YAML_VALIDATED', 'READY_TO_RUN'].includes(draft.state)) {
+      throw new DraftServiceError('INVALID_STATE', `状態 ${draft.state} では要件を編集できません`);
+    }
+    const current = this.deps.repo.getRevision(draft.id, draft.currentRevision);
+    if (!current?.proposal) throw new DraftServiceError('INVALID_STATE', 'タスク素案がありません');
+    const proposal: TaskProposal = { ...current.proposal, ...stripUndefined(input.edits) };
+    // 常に新 revision（承認フラグはリセット）。承認済み revision は不変のまま残る（RA-11/RA-12）
+    const rev = this.deps.repo.createRevision(draft.id, proposal, null, []);
+    draft = this.deps.repo.updateDraft(draft.id, { state: 'SUMMARY_READY', approvedTaskId: null });
+    draft = this.finalizeRevision(draft, rev.revision, proposal);
+    return this.emit(this.view(draft));
+  }
+
+  async approve(input: { draftId: string; revision: number; acknowledgeDataSharing: true }): Promise<DraftApproveResult> {
+    let draft = this.getDraftOrThrow(input.draftId);
+    if (draft.state === 'BLOCKED') throw new DraftServiceError('DRAFT_BLOCKED', draft.blockedReason ?? 'BLOCKED');
+    if (draft.state !== 'AWAITING_APPROVAL') throw new DraftServiceError('INVALID_STATE', `状態 ${draft.state} では承認できません`);
+    if (input.revision !== draft.currentRevision) throw new DraftServiceError('INVALID_STATE', `revision ${input.revision} は最新（${draft.currentRevision}）ではありません。内容を確認し直してください`);
+    const rev = this.deps.repo.getRevision(draft.id, input.revision);
+    if (!rev?.taskYaml || !rev.proposal) throw new DraftServiceError('VALIDATION_FAILED', 'task.yaml が生成されていません');
+    if (rev.approved) throw new DraftServiceError('INVALID_STATE', 'この revision は既に承認済みです');
+    const blocking = this.unansweredBlocking(draft);
+    if (blocking.length > 0) throw new DraftServiceError('DRAFT_BLOCKED', `blocking の質問が未回答です: ${blocking.join(', ')}`);
+    const parsed = parseAndValidateTaskYaml(rev.taskYaml);
+    if (!parsed.ok) throw new DraftServiceError('VALIDATION_FAILED', `task.yaml が契約に適合しません: ${parsed.errors.join('; ')}`);
+    const project = this.deps.repo.getProject(draft.projectId);
+    const readiness = checkProfileReadiness(project?.path ?? parsed.task.repository, parsed.task.verificationProfile);
+    if (!readiness.ready) throw new DraftServiceError('VALIDATION_FAILED', `検証プロファイルを実行できません: ${readiness.detail}`);
+    for (const r of parsed.task.requirements) {
+      const ops = detectProhibitedOperations(r);
+      if (ops.length > 0) throw new DraftServiceError('POLICY_REJECTED', `要件に禁止操作が含まれています（${ops.map((o) => o.code).join(', ')}）。${ops[0]!.guidance}`);
+    }
+
+    draft = this.deps.repo.updateDraft(draft.id, { state: 'APPROVED' });
+    this.emit(this.view(draft));
+    draft = this.deps.repo.updateDraft(draft.id, { state: 'YAML_VALIDATED' });
+    this.emit(this.view(draft));
+    const dir = join(this.deps.tasksDir, safeSegment(parsed.task.id), 'revisions', String(rev.revision));
+    mkdirSync(dir, { recursive: true });
+    const yamlPath = join(dir, 'task.yaml');
+    writeFileSync(yamlPath, rev.taskYaml, 'utf8');
+    const approved = this.deps.repo.approveRevision(draft.id, rev.revision, parsed.task, rev.taskYaml, yamlPath);
+    draft = this.getDraftOrThrow(draft.id);
+    const view = this.emit(this.view(draft));
+    return { draft: view, approvedTaskId: approved.id, taskYaml: approved.taskYaml, taskYamlPath: yamlPath };
+  }
+
+  getView(draftId: string): DraftView {
+    return this.view(this.getDraftOrThrow(draftId));
+  }
+
+  // ---- internals ----
+
+  private getDraftOrThrow(id: string): DraftRow {
+    const d = this.deps.repo.getDraft(id);
+    if (!d) throw new DraftServiceError('NOT_FOUND', `draft が見つかりません: ${id}`);
+    return d;
+  }
+
+  private currentQuestions(draft: DraftRow): AskedQuestion[] {
+    return this.deps.repo.listQuestions(draft.id).filter((q) => q.round === draft.round);
+  }
+
+  private unansweredBlocking(draft: DraftRow): string[] {
+    const answered = new Set(this.deps.repo.listAnswers(draft.id).filter((a) => !a.skipped).map((a) => a.questionId));
+    return this.deps.repo.listQuestions(draft.id).filter((q) => q.decisionImpact === 'blocking' && !answered.has(q.id)).map((q) => q.id);
+  }
+
+  private async context(draft: DraftRow): Promise<DraftContext> {
+    const cached = this.contexts.get(draft.id);
+    if (cached) return cached;
+    const project = this.deps.repo.getProject(draft.projectId);
+    if (!project) throw new DraftServiceError('NOT_FOUND', 'project が見つかりません');
+    const inspection = await this.deps.inspector.inspect(project.path);
+    if (!inspection.ok) throw new DraftServiceError('DRAFT_BLOCKED', `リポジトリを再調査できません: ${inspection.message}`);
+    const ctx = { digest: inspection.digest, info: inspection.info };
+    this.contexts.set(draft.id, ctx);
+    return ctx;
+  }
+
+  /** モデルを呼び、質問アルゴリズムを適用して次の状態へ遷移する。 */
+  private async runRound(draft: DraftRow, round: number, signal: AbortSignal): Promise<DraftView> {
+    const ctx = await this.context(draft);
+    const asked = this.deps.repo.listQuestions(draft.id);
+    const answers = this.deps.repo.listAnswers(draft.id);
+    draft = this.deps.repo.updateDraft(draft.id, { state: 'GAP_ANALYZING', round });
+    const result = await this.deps.model.interview(
+      {
+        request: draft.request,
+        facts: draft.facts,
+        digestText: renderDigest(ctx.digest),
+        askedQuestions: asked,
+        answers,
+        round,
+        remainingQuestions: Math.max(0, 15 - asked.length),
+        prohibitedOperations: draft.prohibited
+      },
+      signal
+    );
+    if (!result.ok) {
+      draft = this.deps.repo.updateDraft(draft.id, { state: 'BLOCKED', blockedReason: `Requirements Agent の出力を利用できません: ${result.error}` });
+      return this.view(draft);
+    }
+    const knownSources = new Set<string>([...ctx.digest.tree, 'package.json', 'package.json#scripts', '.git/HEAD', 'git status', ...ctx.digest.configFiles]);
+    const gap = analyzeGap({ modelOutput: result.value, inspectorFacts: draft.facts, askedQuestions: asked, answers, round, knownSources });
+    if (!gap.ok) {
+      draft = this.deps.repo.updateDraft(draft.id, { state: 'BLOCKED', blockedReason: gap.error });
+      return this.view(draft);
+    }
+    const a = gap.analysis;
+    draft = this.deps.repo.updateDraft(draft.id, { facts: a.facts, summary: a.interview.summary });
+    if (a.blocked) {
+      draft = this.deps.repo.updateDraft(draft.id, { state: 'BLOCKED', blockedReason: a.blocked.reason });
+      return this.view(draft);
+    }
+    if (!a.summaryReady) {
+      this.deps.repo.addQuestions(draft.id, a.questions.map((q) => ({ ...q, round })));
+      draft = this.deps.repo.updateDraft(draft.id, { state: 'ASKING', round });
+      return this.view(draft);
+    }
+    // 質問終了 → 素案生成（RA-09/RA-10）
+    const proposal = await this.deps.model.propose(
+      { request: draft.request, facts: draft.facts, digestText: renderDigest(ctx.digest), askedQuestions: asked, answers, prohibitedOperations: draft.prohibited, summary: a.interview.summary },
+      signal
+    );
+    if (!proposal.ok) {
+      draft = this.deps.repo.updateDraft(draft.id, { state: 'BLOCKED', blockedReason: `タスク素案を生成できません: ${proposal.error}` });
+      return this.view(draft);
+    }
+    const validated = validateProposal(proposal.value);
+    if (!validated.ok) {
+      draft = this.deps.repo.updateDraft(draft.id, { state: 'BLOCKED', blockedReason: validated.error });
+      return this.view(draft);
+    }
+    draft = this.deps.repo.updateDraft(draft.id, { state: 'SUMMARY_READY', round });
+    const current = this.deps.repo.getRevision(draft.id, draft.currentRevision);
+    const revision = current && !current.approved && !current.proposal ? current.revision : this.deps.repo.createRevision(draft.id, null, null, []).revision;
+    draft = this.finalizeRevision(draft, revision, validated.value);
+    return this.view(draft);
+  }
+
+  /** 素案から task.yaml を生成・検証し、revision に保存。成功なら AWAITING_APPROVAL。 */
+  private finalizeRevision(draft: DraftRow, revision: number, proposal: TaskProposal): DraftRow {
+    const project = this.deps.repo.getProject(draft.projectId);
+    const info = project?.inspected ?? this.contexts.get(draft.id)?.info ?? null;
+    const repository = project?.path ?? '';
+    const baseRef = info?.defaultBaseRef ?? info?.currentBranch ?? 'HEAD';
+    const previous = this.deps.repo.listRevisions(draft.id).find((r) => r.taskYaml);
+    const previousTaskId = previous?.taskYaml ? parseAndValidateTaskYaml(previous.taskYaml) : null;
+    const generated = generateTask({ proposal, repository, baseRef, verificationProfile: 'node-pnpm', ...(previousTaskId?.ok ? { taskId: previousTaskId.task.id } : {}) });
+    const readiness = info?.verificationProfile?.ready ?? false;
+    const errors = [...(generated.ok ? [] : generated.errors), ...(readiness ? [] : [`検証プロファイル node-pnpm を実行できません: ${info?.verificationProfile?.missingScripts.length ? `scripts 不足 ${info.verificationProfile.missingScripts.join(', ')}` : 'package.json / pnpm-lock.yaml を確認してください'}`])];
+    this.deps.repo.updateRevision(draft.id, revision, { proposal, taskYaml: generated.yaml, validationErrors: errors });
+    const state: DraftState = errors.length === 0 ? 'AWAITING_APPROVAL' : 'SUMMARY_READY';
+    return this.deps.repo.updateDraft(draft.id, { state, currentRevision: revision });
+  }
+
+  /** 戻る: 直前の回答ラウンドを取り消し、そのラウンドの質問を再表示する。 */
+  private async back(draft: DraftRow, _signal: AbortSignal): Promise<DraftView> {
+    if (['APPROVED', 'YAML_VALIDATED', 'READY_TO_RUN'].includes(draft.state)) throw new DraftServiceError('INVALID_STATE', '承認後は戻れません。要件を編集すると新しい revision になります');
+    const answers = this.deps.repo.listAnswers(draft.id);
+    const target = previousAnsweredRound(answers);
+    if (target === null) throw new DraftServiceError('INVALID_STATE', '戻れる回答がありません');
+    // target より後のラウンドの質問（未回答）を削除し、target の回答を取り消す
+    for (const q of this.deps.repo.listQuestions(draft.id)) if (q.round > target) this.deps.repo.removeQuestionsForRound(draft.id, q.round);
+    this.deps.repo.retractAnswersForRound(draft.id, target);
+    const current = this.deps.repo.getRevision(draft.id, draft.currentRevision);
+    if (current && !current.approved && current.proposal) {
+      // 素案は無効化（再評価後に作り直す）
+      this.deps.repo.updateRevision(draft.id, current.revision, { proposal: null, taskYaml: null, validationErrors: [] });
+    }
+    draft = this.deps.repo.updateDraft(draft.id, { state: 'ASKING', round: target, blockedReason: null, approvedTaskId: null });
+    return this.view(draft);
+  }
+
+  private view(draft: DraftRow): DraftView {
+    const project = this.deps.repo.getProject(draft.projectId);
+    const asked = this.deps.repo.listQuestions(draft.id);
+    const answers = this.deps.repo.listAnswers(draft.id);
+    const rev = this.deps.repo.getRevision(draft.id, draft.currentRevision);
+    const info = project?.inspected ?? null;
+    return {
+      id: draft.id,
+      projectPath: project?.path ?? '',
+      request: draft.request,
+      state: draft.state,
+      revision: draft.currentRevision,
+      round: draft.round,
+      totalQuestionsAsked: asked.length,
+      facts: draft.facts as Fact[],
+      currentQuestions: draft.state === 'ASKING' ? asked.filter((q) => q.round === draft.round).slice(0, 3) : [],
+      askedQuestions: asked,
+      answers,
+      blockingQuestions: this.unansweredBlocking(draft),
+      summary: draft.summary,
+      proposal: rev?.proposal ?? null,
+      taskYaml: rev?.taskYaml ?? null,
+      validationErrors: rev?.validationErrors ?? [],
+      blockedReason: draft.state === 'BLOCKED' ? draft.blockedReason : null,
+      prohibitedOperations: draft.prohibited,
+      verificationReadiness: info?.verificationProfile ? { profile: info.verificationProfile.name, ready: info.verificationProfile.ready, missingScripts: info.verificationProfile.missingScripts, detail: info.verificationProfile.ready ? '実行可能' : `scripts 不足: ${info.verificationProfile.missingScripts.join(', ') || 'lockfile 等'}` } : null,
+      approved: rev?.approved ?? false,
+      approvedTaskId: draft.approvedTaskId,
+      createdAt: draft.createdAt,
+      updatedAt: draft.updatedAt
+    };
+  }
+
+  private emit(view: DraftView): DraftView {
+    try {
+      this.deps.onDraftUpdated?.(view);
+    } catch {
+      /* ignore listener failures */
+    }
+    return view;
+  }
+}
+
+function stripUndefined<T extends object>(obj: T): Partial<T> {
+  return Object.fromEntries(Object.entries(obj).filter(([, v]) => v !== undefined)) as Partial<T>;
+}
+
+function safeSegment(s: string): string {
+  return s.replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 80) || 'task';
+}
