@@ -8,12 +8,20 @@ import { excerpt } from '../masking.js';
  *   2. `pnpm run <script>` をサンドボックス内（network none、workspace rw）で実行する
  *   3. 再びハッシュを取り、1 と一致すれば「最新」= 合格。違えば Builder の出力が古い / 未更新 = 不合格
  * script は package.json の scripts 名だけを受け付ける（任意のシェルコマンドは実行しない）。失敗は AI の推測で覆せない。
+ * Verifier はワークスペースを変更しない: 再生成の前に生成物を退避し、比較後に Builder の出力へ戻す（再生成で変わった内容は結果メッセージにだけ残る）。
  */
 const HASH_SCRIPT = [
   "const fs=require('fs');const p=process.argv[1];let t;",
   "try{t=fs.readFileSync(p,'utf8')}catch{console.log('MISSING');process.exit(0)}",
   "t=t.replace(/\\d{4}-\\d{2}-\\d{2}T[\\d:.]+Z/g,'<ts>').replace(/[ \\t]+$/gm,'').replace(/\\r\\n/g,'\\n');",
   "console.log(require('crypto').createHash('sha256').update(t).digest('hex'))"
+].join('');
+
+/** 退避 / 復元（固定スクリプト）。argv: snapshot|restore <path>。退避先は <path>.ao-orig（無ければ生成前は存在しなかった扱い） */
+const SNAPSHOT_SCRIPT = [
+  "const fs=require('fs');const [mode,p]=process.argv.slice(1);const b=p+'.ao-orig';",
+  "if(mode==='snapshot'){if(fs.existsSync(p))fs.copyFileSync(p,b);else if(fs.existsSync(b))fs.unlinkSync(b);}",
+  "else{if(fs.existsSync(b)){fs.copyFileSync(b,p);fs.unlinkSync(b);}else if(fs.existsSync(p))fs.unlinkSync(p);}"
 ].join('');
 
 const SCRIPT_NAME_RE = /^[A-Za-z0-9_:.@/-]+$/;
@@ -42,9 +50,19 @@ export async function verifyGeneratedArtifacts(sandbox: SandboxExecutor, input: 
       const r = await sandbox.exec(input.runId, { name: `generate-hash-${label}-r${input.round}`, argv: ['node', '-e', HASH_SCRIPT, a.path], workspace: 'rw', aux: 'none', workdir: CONTAINER_WORKSPACE, env: input.env, network: 'none', timeoutMs: 60_000, signal: input.signal });
       return r.exitCode === 0 ? r.stdout.trim() : null;
     };
-    input.onLog(`\n$ pnpm run ${a.script}  # 生成物 ${a.path} の更新確認\n`);
+    const snapshot = (mode: 'snapshot' | 'restore') => sandbox.exec(input.runId, { name: `generate-${mode}-r${input.round}`, argv: ['node', '-e', SNAPSHOT_SCRIPT, mode, a.path], workspace: 'rw', aux: 'none', workdir: CONTAINER_WORKSPACE, env: input.env, network: 'none', timeoutMs: 60_000, signal: input.signal });
+    input.onLog(`\n$ pnpm run ${a.script}  # 生成物 ${a.path} の更新確認（比較後に Builder の出力へ戻す）\n`);
     const before = await hash('before');
-    const run = await sandbox.exec(input.runId, { name: `generate-${a.script.replace(/[^A-Za-z0-9-]/g, '-')}-r${input.round}`, argv: ['pnpm', 'run', a.script], workspace: 'rw', aux: 'none', workdir: CONTAINER_WORKSPACE, env: input.env, network: 'none', timeoutMs: input.timeoutMs, signal: input.signal, onStdout: input.onLog, onStderr: input.onLog });
+    await snapshot('snapshot');
+    let run;
+    let after: string | null = null;
+    try {
+      run = await sandbox.exec(input.runId, { name: `generate-${a.script.replace(/[^A-Za-z0-9-]/g, '-')}-r${input.round}`, argv: ['pnpm', 'run', a.script], workspace: 'rw', aux: 'none', workdir: CONTAINER_WORKSPACE, env: input.env, network: 'none', timeoutMs: input.timeoutMs, signal: input.signal, onStdout: input.onLog, onStderr: input.onLog });
+      if (!run.timedOut && run.exitCode === 0) after = await hash('after');
+    } finally {
+      // Verifier はワークスペースを変更しない（生成物は Builder の出力に戻す）
+      await snapshot('restore');
+    }
     if (run.timedOut) {
       results.push(fail(`生成スクリプト ${a.script} がタイムアウトしました`, null, true));
       continue;
@@ -53,7 +71,6 @@ export async function verifyGeneratedArtifacts(sandbox: SandboxExecutor, input: 
       results.push(fail(`生成スクリプト ${a.script} が失敗しました（exit ${run.exitCode ?? 'null'}）。ネットワークは遮断されています。\n${run.stderr || run.stdout}`, run.exitCode));
       continue;
     }
-    const after = await hash('after');
     if (before === null || after === null) {
       results.push(fail(`生成物 ${a.path} のハッシュを取得できませんでした`));
     } else if (before === 'MISSING' && after === 'MISSING') {

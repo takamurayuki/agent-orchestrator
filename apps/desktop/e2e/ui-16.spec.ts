@@ -11,7 +11,7 @@ test.describe('UI-16 事前診断と最小実装の素案', () => {
     await expect(diag).toHaveAttribute('data-verdict', 'issues');
     await expect(page.getByTestId('diagnosis-verdict')).toContainText('問題あり');
     await expect(diag).toContainText('事前診断（ヒアリング前の確認）');
-    await expect(diag).toContainText('設定の自動変更は行いません');
+    await expect(diag).toContainText('自動変更は行いません');
     // 実行に影響する事項（問題あり）だけが目立つ位置に出る。未確認は折りたたみで理由と確認方法を示す
     await expect(page.locator('[data-testid="diagnosis-check"][data-status="warn"]')).toContainText('binaries.prisma.sh');
     const unverifiedBox = page.getByTestId('diagnosis-unverified');

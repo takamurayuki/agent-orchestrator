@@ -2,6 +2,38 @@
 
 作成日: 2026-11-01（リリース準備フェーズ後に更新）　対象: `docs/SPEC.md` v2.0　受入結果: `docs/ACCEPTANCE_REPORT.md`（**PASS 56 / FAIL 0 / NOT_RUN 0**）
 
+## 0¹⁰. v0.2.1 安定化フェーズの結果（2026-11-02 追記）
+
+### 実装概要
+
+| Phase | 内容 | 決定記録 |
+|---|---|---|
+| 1 生成物更新の検証 | 素案・task.yaml に `generatedArtifacts: [{ path, script, reason }]`（必須、空可）を追加。`script` は **package.json の scripts 名のみ**（契約の正規表現 + 承認時の存在確認。任意のシェルコマンドは宣言も実行も不可）。リポジトリ調査が scripts 名・コマンド中の出力ファイル・生成ファイルのヘッダー（自動生成 / generated / DO NOT EDIT + 生成元パス）から `generation.script` / `generated.file` の facts を出し、素案プロンプトで生成物の列挙を必須化。script が package.json に無ければ推測せず承認前に blocking 質問 `GEN-<round>-<n>`（候補 script + 「今回は対象外（人が更新）」）を出し、回答を判断記録として素案に機械的に適用。Builder には `pnpm run <script>` の実行と手編集禁止を指示。Verifier はプロファイル検証の合格後、生成物ごとに正規化ハッシュ（ISO 時刻・行末空白・CRLF 無視）→ 退避 → `pnpm run <script>`（サンドボックス内、ネットワーク none）→ ハッシュ → 復元を行い、一致したときだけ検証コマンド `generate:<script>` を合格にする（Verifier はワークスペースを変更しない）。完了ゲートは生成物ごとに `generate:<script>` を必須。Reviewer には「生成物は Verifier が確認済み」と伝える。承認画面に「生成物の更新」節 | D-41 |
+| 2 事前診断 UX | verdict を `ready / unverified / issues / blocked`（実行可能 / 未確認あり / 問題あり / 実行不可）に分け、`minimumReleaseAge` 未設定・インストール時スクリプト・判定不能な engines は **未確認**（問題と断定しない）。各未確認項目に `howToVerify`（確認方法）を追加。ホーム画面は実行に影響する項目（fail / warn）だけを目立たせ、未確認は件数付きの折りたたみに「理由」「確認方法」「失敗したとき」を表示、正常項目も折りたたみ。サプライチェーン設定・allowlist の自動変更なし | D-38 改訂 |
+
+状態機械、Docker 隔離・seccomp・egress allowlist・Policy Gate は変更なし。新しい検証コマンド `generate:<script>`、質問 ID 接頭辞 `GEN-`、root の `quality:report` script、サンプルフィクスチャの生成物 `docs/API.md`（`docs:api`）を追加。
+
+### テスト結果
+
+- Vitest 249 passed / 8 skipped（LIVE 用）（実 Docker 7 件含む。新規: 生成物の facts・質問・判断適用 6、Verifier の生成物検証・ゲート・退避復元 8、DraftService の GEN 質問フロー 4）、Playwright 29（ui-16 を新しい診断 UI と「生成物の更新」節に合わせて更新）、tsc / svelte-check / eslint クリーン（Rust は変更なし）。
+- **事前診断の偽陽性・偽陰性**（`scripts/diagnosis-audit.mjs`、実プロジェクトのコピー 5 件 + サンプル 1 件）: 実行不可 0、問題あり 2（batontime の `packageManager pnpm@9`、temporaid の prisma / playwright 取得先。いずれも真陽性）、未確認 4（全件 `minimumReleaseAge` 未設定のみ）。v0.2.0 では 5/5 が「要確認」だったものが、実行に影響する 2 件と「未確認だが実行可能」4 件に分かれた。偽陰性 0。
+- **実 CLI（生成物を含むタスク）**: 下表。
+
+| タスク | v0.2.0 | v0.2.1 |
+|---|---|---|
+| 品質レポートに平均費用の行（本リポジトリのクローン。生成物 `docs/QUALITY_REPORT.md` ← `quality:report`） | NEEDS_HUMAN / MAX_ROUNDS、3 ラウンド、494 秒、$0.26。Builder が生成スクリプトを実行せず、Reviewer が 3 回同じ指摘 | NEEDS_HUMAN / MAX_ROUNDS、3 ラウンド、620 秒、$0.33。素案が質問なしで生成物を識別（script は既存）。R1: Builder が `pnpm run quality:report` を実行し `generate:quality:report` 合格、Reviewer が「再生成で 26 件が空になった」と指摘（真陽性: 生成器の入力 `test-results/` は gitignore でクローンに無い）。R2: Builder が生成物を `git show` で手で戻し再生成しなかった → **Verifier の `generate:quality:report` が不合格（更新漏れを決定的に検出）**。R3: 再生成 → Reviewer が再指摘 → 停止。停止理由は正確で、入力がリポジトリに無い生成物はサンドボックスで妥当に再生成できないという本質的な制約 |
+| サンプル `shout` 関数追加（依頼文は生成物に触れない。生成物 `docs/API.md` ← `docs:api`） | — | COMPLETED、2 ラウンド、176 秒、$0.09。facts だけから素案が `generatedArtifacts` を識別。R1: Builder 側 Claude Code の自前ヒューリスティックがコマンドを拒否し再生成されず → `generate:docs:api` 不合格（stale）。R2: 再生成して合格、Reviewer approved。元リポジトリ不変、egress 拒否 8（Codex のテレメトリ） |
+| 同上（退避・復元を加えた Verifier で再実行） | — | COMPLETED、**1 ラウンド**、145 秒、$0.06。Builder が `pnpm run docs:api` を実行して差分に含め、`generate:docs:api` 合格、Reviewer approved。作業用コピーに退避ファイルは残らず、生成物は Builder の出力のまま |
+
+累計（`docs/QUALITY_REPORT.md` 改善前後表）: 改善前 21 件 完了 57% / 要確認 5 / unknown 1、v0.2.0 5 件 完了 60% / 要確認 2 / unknown 1、v0.2.1 3 件 完了 67%（2/3）/ 要確認 1 / unknown 0、完了タスク平均費用 $0.07（前フェーズと同じ）。v0.2.1 の未完了 1 件は上記の「入力がリポジトリに無い生成物」で、更新漏れ自体は Verifier が検出している
+
+### 残課題
+
+- 生成器の入力がリポジトリに無い（gitignore された計測結果など）生成物は、サンドボックスでは「最新か」は確認できても内容の妥当性は保証できない。事前診断または素案段階で「入力がコミットされていない生成物」を警告するのが次の改善候補。
+- サブパッケージの scripts は root の `pnpm run` から呼べないため、生成物の script は root に委譲 script を用意する必要がある（本リポジトリでは `quality:report` を追加）。
+- Builder 側 CLI の自前ヒューリスティックによるコマンド拒否で 1 ラウンド消費する事例（サンプルタスク R1）。本ツール側では Verifier の不合格として正しく検出されるが、ラウンドと費用がかかる。
+- `minimumReleaseAge` 未設定は引き続き「未確認」。確定にはレジストリ照会が必要で行わない方針。別環境・外部テスターでの検証は未実施。
+
 ## 0⁹. v0.2.0 βフィードバック改善の結果（2026-11-02 追記）
 
 ### 実装概要

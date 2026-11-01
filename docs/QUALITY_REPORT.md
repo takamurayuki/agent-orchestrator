@@ -2,22 +2,22 @@
 
 # 品質評価レポート（ドッグフーディング）
 
-生成: 2026-11-01T16:40:34.239Z 対象: 26 件（test-results/dogfood/*.json）
+生成: 2026-11-01T17:00:48.733Z 対象: 29 件（test-results/dogfood/*.json）
 
 ## 指標
 
 | 指標 | 値 |
 |---|---|
-| タスク数（Run 開始まで到達 / 全体） | 25 / 26 |
-| タスク完了率（COMPLETED / Run 開始） | 15/25 = 60% |
-| 内訳 | COMPLETED 15、NEEDS_HUMAN 7、PRECHECK_FAILED 3、INTERNAL_ERROR 0、承認前停止 1 |
-| 1 タスク当たりの実行時間（ヒアリング+Run、平均） | 271s（ヒアリング 75s、Run 210s） |
-| 平均修正ラウンド数（Run 開始分） | 1.36 |
-| Builder 1 回あたり平均時間 | 42s（34 回） |
-| Reviewer 1 回あたり平均時間 | 22s（30 回） |
-| unknown 発生率（レビュー） | 2/30 |
-| AI 利用量（Builder の報告費用） | $3.071（報告あり 34 回） |
-| egress 拒否（allowlist 外） | 240 件 ／ 許可 5518 件 ／ エラー 2 件 |
+| タスク数（Run 開始まで到達 / 全体） | 28 / 29 |
+| タスク完了率（COMPLETED / Run 開始） | 17/28 = 61% |
+| 内訳 | COMPLETED 17、NEEDS_HUMAN 8、PRECHECK_FAILED 3、INTERNAL_ERROR 0、承認前停止 1 |
+| 1 タスク当たりの実行時間（ヒアリング+Run、平均） | 276s（ヒアリング 72s、Run 216s） |
+| 平均修正ラウンド数（Run 開始分） | 1.43 |
+| Builder 1 回あたり平均時間 | 44s（40 回） |
+| Reviewer 1 回あたり平均時間 | 21s（34 回） |
+| unknown 発生率（レビュー） | 2/34 |
+| AI 利用量（Builder の報告費用） | $3.554（報告あり 40 回） |
+| egress 拒否（allowlist 外） | 272 件 ／ 許可 5897 件 ／ エラー 2 件 |
 | 元リポジトリ不変 | 全件 |
 
 
@@ -27,6 +27,7 @@
 |---|---|---|---|---|---|---|---|---|---|---|
 | v2.x〜β（改善前） | 21 | 12/21 = 57% | 3 | 5 | 1 | 265s | 1.35 | $2.43 / $0.09 | 10/23 | 1 |
 | v0.2.0（改善後） | 5 | 3/5 = 60% | 0 | 2 | 0 | 298s | 1.40 | $0.64 / $0.07 | 3/7 | 1 |
+| v0.2.1（安定化） | 3 | 2/3 = 67% | 0 | 1 | 0 | 314s | 2.00 | $0.48 / $0.07 | 2/4 | 0 |
 ## タスク別
 
 | タスク | 状態 | 理由 | ラウンド | 時間 | 変更ファイル | 未解決指摘 | 人間レビュー |
@@ -52,6 +53,9 @@
 | v020b-sample-greet-upper | COMPLETED | round 1: すべての完了ゲートを通過 | 1 | 156s | 2 | 0 | approved: 改善後の素案は expectedChanges（src/greet.ts, test/greet.test.ts）と conflictRisks（greet 本体は変更しない、lint ルール、strict）を含み、差分は範囲内（scope none）。構造検証 OK、1 ラウンドで完了、$0.04。人間の指摘なし。 |
 | v020b-self-quality-avg-cost | NEEDS_HUMAN | round 3: レビュー changes_requested、修正上限に到達 | 3 | 494s | 3 | 1 | needs_human: 改善後: 素案に expectedChanges（quality-report.mjs, QUALITY_REPORT.md, テスト）と conflictRisks（既存指標を変えない等）が付き、Builder の差分はスコープ判定で minor（新モジュール 1 + テスト 1 の 2 件。tests/ の自由記述エントリは句点で区切れず不一致 → 修正）。Reviewer は改訂ルールにより unknown ではなく changes_requested を 3 回返し、指摘は一貫して「生成済み docs/QUALITY_REPORT.md が更新されていない（AC-006）」。素案プロンプトの『実行が必要な受入条件を書かない』指示にもかかわらず AC-006 がドキュメント再生成を要求しており、Builder はスクリプトを実行しなかった。結果は NEEDS_HUMAN / MAX_ROUNDS だが、β時（3 ラウンド $0.66、730 秒、unknown）に比べ $0.26・494 秒・理由が明確。残課題: 受入条件が生成物の更新を要求する場合は、Builder に生成コマンドの実行を促すか素案段階で除外する。 |
 | v020b-self-report-policy-warning | COMPLETED | round 1: すべての完了ゲートを通過 | 1 | 309s | 2 | 0 | approved: 改善後: expectedChanges（report.ts, report.test.ts）どおりの差分（scope none）。出力は『- [注意] …』の形でリスト記号を先頭に置いており、β時の体裁崩れ（接頭辞がリスト記号の前）は再発しなかった。Reviewer approved、1 ラウンド、$0.15。 |
+| v021-sample-shout-docs | COMPLETED | round 2: すべての完了ゲートを通過 | 2 | 176s | 3 | 0 | approved: v0.2.1: 依頼文に docs/API.md の言及が無くても、facts（generated.file: docs/API.md ← docs:api）から素案が generatedArtifacts を識別。R1 は Builder 側 Claude Code の自前ヒューリスティック（brace with quote character）がコマンドを拒否して再生成できず、Verifier の generate:docs:api が不合格（stale）→ R2 で再生成して合格、Reviewer approved、COMPLETED、176 秒、/usr/bin/bash.09。観察: Verifier の再生成がワークスペースに残り R2 の Builder が「最初から最新だった」と報告 → 退避・復元を追加（v021b で再確認）。 |
+| v021-self-quality-avg-cost | NEEDS_HUMAN | round 3: レビュー changes_requested、修正上限に到達 | 3 | 620s | 3 | 1 | changes_requested: v0.2.1: 素案が生成物 docs/QUALITY_REPORT.md（script quality:report）を質問なしで識別し、Builder は R1 で pnpm run quality:report を実行、Verifier の generate:quality:report は合格。Reviewer は「再生成で 26 件のデータが空になった」と指摘（真陽性: 生成器の入力 test-results/ は gitignore でクローンに無い）。R2 で Builder が生成物を git show で手で戻し再生成しなかったところ、Verifier の generate:quality:report が不合格（再実行すると内容が変わる）= 更新漏れを AI の推測ではなく決定的に検出。R3 で再生成 → Reviewer 再指摘 → NEEDS_HUMAN / MAX_ROUNDS、620 秒、/usr/bin/bash.33。停止は妥当（入力がリポジトリに無い生成物はサンドボックスで妥当な内容に再生成できない）。残課題: 生成器の入力が gitignore 配下の場合に事前に警告する。 |
+| v021b-sample-shout-docs | COMPLETED | round 1: すべての完了ゲートを通過 | 1 | 145s | 3 | 0 | 未 |
 | v21-conflict-gate-2 | COMPLETED | round 1: すべての完了ゲートを通過 | 1 | 244s | 2 | 0 | approved: v2.1 実機検証 2 回目（修正後）。ヒアリングの選択肢順が concat / exception / disable_rule となり（規則緩和は非推奨と明示）、文字列連結で実装。eslint-disable なし、Policy Gate 0 件、lint 通過、Codex approved。人間レビューも approved。矛盾はヒアリング段階で解消されたため矛盾検出ステップの差し戻しは発生せず（通常質問として回答履歴に残る。意思決定ログには CONTRA- 質問のみ記録される点は改善候補）。 |
 | v21-conflict-gate | COMPLETED | round 1: すべての完了ゲートを通過 | 1 | 194s | 2 | 0 | rejected: v2.1 実機検証 1 回目。ヒアリングで矛盾は質問されたが（自動回答が先頭の disable_line を選択）、Builder が行末コメント `// eslint-disable-line no-restricted-syntax` で規則を回避し、初版 Policy Gate（scanner 実装）が取り逃がして COMPLETED。人間レビューでは不合格（規則の局所無効化）。→ パーサ駆動のコメント収集に修正し、監査で同ワークスペースの検出を確認。 |
 | v22-policy-loop-2 | NEEDS_HUMAN | round 3: Policy Gate の未承認違反 1 件（PG-ESLINT-DISABLE）、修正上限に到達 | 3 | 304s | 2 | 2 | needs_human: ヒアリングで eslint_disable → register_exception（「後で登録する」）を選択し、要件が「console.log と理由付き eslint-disable-next-line を必須」になった。Round 1: Builder が eslint-disable-next-line no-console を追加 → Policy Gate が PG-ESLINT-DISABLE で差し戻し（POLICY_BLOCKED）。Round 2: フィードバック（feedback.json に違反と修正指示）を受けて process.stdout.write に修正、検証 3/3 PASS、Codex は「要件が console.log と抑制コメントを明示しているのに逸脱」として changes_requested（指摘は要件に照らして妥当）。Round 3: Builder が再び eslint-disable を追加 → 差し戻し → 上限で NEEDS_HUMAN / POLICY_VIOLATION。要件と Policy Gate が真正面から矛盾しており、人間が例外登録か要件変更を決めるべき状況。ツールの判断は妥当。Policy Gate の差し戻しループと指摘の受け渡しは実測できた。 |
@@ -81,6 +85,8 @@
 - **v020b-sample-greet-upper**: AI=approved / 人間=approved（一致）。改善後の素案は expectedChanges（src/greet.ts, test/greet.test.ts）と conflictRisks（greet 本体は変更しない、lint ルール、strict）を含み、差分は範囲内（scope none）。構造検証 OK、1 ラウンドで完了、$0.04。人間の指摘なし。
 - **v020b-self-quality-avg-cost**: AI=changes_requested/needs_human / 人間=needs_human（一致）。改善後: 素案に expectedChanges（quality-report.mjs, QUALITY_REPORT.md, テスト）と conflictRisks（既存指標を変えない等）が付き、Builder の差分はスコープ判定で minor（新モジュール 1 + テスト 1 の 2 件。tests/ の自由記述エントリは句点で区切れず不一致 → 修正）。Reviewer は改訂ルールにより unknown ではなく changes_requested を 3 回返し、指摘は一貫して「生成済み docs/QUALITY_REPORT.md が更新されていない（AC-006）」。素案プロンプトの『実行が必要な受入条件を書かない』指示にもかかわらず AC-006 がドキュメント再生成を要求しており、Builder はスクリプトを実行しなかった。結果は NEEDS_HUMAN / MAX_ROUNDS だが、β時（3 ラウンド $0.66、730 秒、unknown）に比べ $0.26・494 秒・理由が明確。残課題: 受入条件が生成物の更新を要求する場合は、Builder に生成コマンドの実行を促すか素案段階で除外する。
 - **v020b-self-report-policy-warning**: AI=approved / 人間=approved（一致）。改善後: expectedChanges（report.ts, report.test.ts）どおりの差分（scope none）。出力は『- [注意] …』の形でリスト記号を先頭に置いており、β時の体裁崩れ（接頭辞がリスト記号の前）は再発しなかった。Reviewer approved、1 ラウンド、$0.15。
+- **v021-sample-shout-docs**: AI=approved / 人間=approved（一致）。v0.2.1: 依頼文に docs/API.md の言及が無くても、facts（generated.file: docs/API.md ← docs:api）から素案が generatedArtifacts を識別。R1 は Builder 側 Claude Code の自前ヒューリスティック（brace with quote character）がコマンドを拒否して再生成できず、Verifier の generate:docs:api が不合格（stale）→ R2 で再生成して合格、Reviewer approved、COMPLETED、176 秒、/usr/bin/bash.09。観察: Verifier の再生成がワークスペースに残り R2 の Builder が「最初から最新だった」と報告 → 退避・復元を追加（v021b で再確認）。
+- **v021-self-quality-avg-cost**: AI=changes_requested/needs_human / 人間=changes_requested（一致）。v0.2.1: 素案が生成物 docs/QUALITY_REPORT.md（script quality:report）を質問なしで識別し、Builder は R1 で pnpm run quality:report を実行、Verifier の generate:quality:report は合格。Reviewer は「再生成で 26 件のデータが空になった」と指摘（真陽性: 生成器の入力 test-results/ は gitignore でクローンに無い）。R2 で Builder が生成物を git show で手で戻し再生成しなかったところ、Verifier の generate:quality:report が不合格（再実行すると内容が変わる）= 更新漏れを AI の推測ではなく決定的に検出。R3 で再生成 → Reviewer 再指摘 → NEEDS_HUMAN / MAX_ROUNDS、620 秒、/usr/bin/bash.33。停止は妥当（入力がリポジトリに無い生成物はサンドボックスで妥当な内容に再生成できない）。残課題: 生成器の入力が gitignore 配下の場合に事前に警告する。
 - **v21-conflict-gate-2**: AI=approved / 人間=approved（一致）。v2.1 実機検証 2 回目（修正後）。ヒアリングの選択肢順が concat / exception / disable_rule となり（規則緩和は非推奨と明示）、文字列連結で実装。eslint-disable なし、Policy Gate 0 件、lint 通過、Codex approved。人間レビューも approved。矛盾はヒアリング段階で解消されたため矛盾検出ステップの差し戻しは発生せず（通常質問として回答履歴に残る。意思決定ログには CONTRA- 質問のみ記録される点は改善候補）。
 - **v21-conflict-gate**: AI=approved / 人間=rejected（不一致）。v2.1 実機検証 1 回目。ヒアリングで矛盾は質問されたが（自動回答が先頭の disable_line を選択）、Builder が行末コメント `// eslint-disable-line no-restricted-syntax` で規則を回避し、初版 Policy Gate（scanner 実装）が取り逃がして COMPLETED。人間レビューでは不合格（規則の局所無効化）。→ パーサ駆動のコメント収集に修正し、監査で同ワークスペースの検出を確認。 未検出: 行末の eslint-disable-line（テンプレートリテラル直後）— 修正済み
 - **v22-policy-loop-2**: AI=changes_requested/needs_human / 人間=needs_human（一致）。ヒアリングで eslint_disable → register_exception（「後で登録する」）を選択し、要件が「console.log と理由付き eslint-disable-next-line を必須」になった。Round 1: Builder が eslint-disable-next-line no-console を追加 → Policy Gate が PG-ESLINT-DISABLE で差し戻し（POLICY_BLOCKED）。Round 2: フィードバック（feedback.json に違反と修正指示）を受けて process.stdout.write に修正、検証 3/3 PASS、Codex は「要件が console.log と抑制コメントを明示しているのに逸脱」として changes_requested（指摘は要件に照らして妥当）。Round 3: Builder が再び eslint-disable を追加 → 差し戻し → 上限で NEEDS_HUMAN / POLICY_VIOLATION。要件と Policy Gate が真正面から矛盾しており、人間が例外登録か要件変更を決めるべき状況。ツールの判断は妥当。Policy Gate の差し戻しループと指摘の受け渡しは実測できた。

@@ -253,3 +253,9 @@ SPEC.md を唯一の要件ベースラインとし、契約の曖昧さ・不整
 
 - **決定:** 自動実行できる検証は Verifier 側へ: 変更された JSON / YAML / Markdown に対する決定的な構造検証（`verification/structure.ts`: 解釈可能、コードフェンスの閉じ、リスト記号の前に文字が付いた行）を検証コマンド `structure` として結果に加え、完了ゲートの必須コマンドに含める（プロファイルのコマンドが失敗した場合は構造検証を行わず、合格を捏造しない）。Reviewer には設計・ロジック・セキュリティ・要件整合性を中心に評価させ、「コマンド実行でしか確認できない条件は requirementsUnverified に挙げる（推測で合格にしない）」「期待範囲外の変更・不要な抽象化を指摘する」を明示。unknown は従来どおり NEEDS_HUMAN（fail-closed）。
 - **理由:** β運用で Reviewer が「ドキュメント再生成を検証できない」として unknown を返した事例と、AI 承認後に人間が見つけた Markdown の体裁崩れ。
+
+## D-41 生成物の更新は「package.json の script 名」で宣言し、Verifier が再生成して比較する（v0.2.1）
+
+- **決定:** 素案（`TaskProposal`）と task.yaml に `generatedArtifacts: [{ path, script, reason }]`（必須、空配列可）を追加する。`script` は **既存の package.json の scripts 名だけ**を受け付け（契約で `^[A-Za-z0-9_:.@/-]+$`、承認時に存在確認）、任意のシェルコマンドは宣言も実行もできない。リポジトリ調査は scripts 名・コマンド中の出力ファイル・生成ファイルのヘッダー（自動生成 / generated / DO NOT EDIT と生成元スクリプトのパス）から `generation.script` / `generated.file` の facts を出す。素案の script が package.json に無い場合は推測で進めず、承認前に blocking 質問 `GEN-<round>-<n>`（候補 script + 「今回は対象外（人が更新）」）を出し、回答は判断記録として素案へ機械的に適用する（script の差し替え、または生成物を外して outOfScope に記録）。Builder には「`pnpm run <script>` を実行し結果をそのまま含める。手で編集しない」と指示する。Verifier はプロファイルの検証がすべて通った後に、生成物ごとに固定の node スクリプトで正規化ハッシュ（ISO 時刻・行末空白・CRLF を無視）を取り、`pnpm run <script>` をサンドボックス内（ネットワーク none、workspace rw）で実行して再度ハッシュを取り、一致したときだけ検証コマンド `generate:<script>` を合格にする。完了ゲートは生成物ごとに `generate:<script>` の結果を必須とする。Reviewer には「生成物は Verifier が確認済み」と伝え、再生成の要求を指摘にしない。
+- **理由:** v0.2.0 の実測で、受入条件が「docs/QUALITY_REPORT.md を再生成する」ことを要求し、Builder がスクリプトを実行せず Reviewer の指摘で 3 ラウンド止まった（NEEDS_HUMAN / MAX_ROUNDS）。生成物の更新は AI の読解では確認できず、決定的に再生成して比較する必要がある。一方で、生成手段を AI が推測してシェルコマンドを実行するのは「任意のシェルコマンド実行機能を追加しない」制約に反するため、allowlist に相当する package.json の scripts に限定し、不明なら人に尋ねる。
+- **トレードオフ:** 入力がリポジトリに無い生成物（gitignore された計測結果から作るレポート等）は、サンドボックスでは入力なしの状態で再生成されるため「最新かどうか」は確認できても内容の妥当性は保証できない。サブパッケージの script は root から呼べないため、root に委譲 script を用意する必要がある。

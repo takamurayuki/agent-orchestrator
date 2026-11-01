@@ -162,5 +162,17 @@
     "agrees": true,
     "notes": "改善後: expectedChanges（report.ts, report.test.ts）どおりの差分（scope none）。出力は『- [注意] …』の形でリスト記号を先頭に置いており、β時の体裁崩れ（接頭辞がリスト記号の前）は再発しなかった。Reviewer approved、1 ラウンド、$0.15。",
     "missed": []
+  },
+  "v021-self-quality-avg-cost": {
+    "verdict": "changes_requested",
+    "agrees": true,
+    "notes": "v0.2.1: 素案が生成物 docs/QUALITY_REPORT.md（script quality:report）を質問なしで識別し、Builder は R1 で pnpm run quality:report を実行、Verifier の generate:quality:report は合格。Reviewer は「再生成で 26 件のデータが空になった」と指摘（真陽性: 生成器の入力 test-results/ は gitignore でクローンに無い）。R2 で Builder が生成物を git show で手で戻し再生成しなかったところ、Verifier の generate:quality:report が不合格（再実行すると内容が変わる）= 更新漏れを AI の推測ではなく決定的に検出。R3 で再生成 → Reviewer 再指摘 → NEEDS_HUMAN / MAX_ROUNDS、620 秒、/usr/bin/bash.33。停止は妥当（入力がリポジトリに無い生成物はサンドボックスで妥当な内容に再生成できない）。残課題: 生成器の入力が gitignore 配下の場合に事前に警告する。",
+    "missed": []
+  },
+  "v021-sample-shout-docs": {
+    "verdict": "approved",
+    "agrees": true,
+    "notes": "v0.2.1: 依頼文に docs/API.md の言及が無くても、facts（generated.file: docs/API.md ← docs:api）から素案が generatedArtifacts を識別。R1 は Builder 側 Claude Code の自前ヒューリスティック（brace with quote character）がコマンドを拒否して再生成できず、Verifier の generate:docs:api が不合格（stale）→ R2 で再生成して合格、Reviewer approved、COMPLETED、176 秒、/usr/bin/bash.09。観察: Verifier の再生成がワークスペースに残り R2 の Builder が「最初から最新だった」と報告 → 退避・復元を追加（v021b で再確認）。",
+    "missed": []
   }
 }

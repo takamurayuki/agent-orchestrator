@@ -32,6 +32,20 @@ describe('generated artifact verification (D-41)', () => {
     const hash = sb.steps.find((s) => s.name.startsWith('generate-hash-before'))!;
     expect(hash.argv.slice(0, 2)).toEqual(['node', '-e']);
     expect(hash.argv[3]).toBe('docs/QUALITY_REPORT.md');
+    // 再生成の前に退避し、比較後に Builder の出力へ戻す（Verifier はワークスペースを変更しない）
+    expect(sb.steps.map((s) => s.name.replace(/-r1$/, ''))).toEqual(['generate-hash-before', 'generate-snapshot', 'generate-quality-report', 'generate-hash-after', 'generate-restore']);
+    expect(sb.steps[1]!.argv.slice(3)).toEqual(['snapshot', 'docs/QUALITY_REPORT.md']);
+    expect(sb.steps[4]!.argv.slice(3)).toEqual(['restore', 'docs/QUALITY_REPORT.md']);
+    for (const s of sb.steps) expect(s.network).toBe('none');
+  });
+
+  it('restores the artifact even when the script fails or times out', async () => {
+    const sb = sandboxWith({ before: 'aaa', after: 'aaa' }, { exitCode: 2 });
+    await verifyGeneratedArtifacts(sb, input());
+    expect(sb.steps.at(-1)!.name).toBe('generate-restore-r1');
+    const to = sandboxWith({ before: 'aaa', after: 'aaa' }, { timedOut: true });
+    await verifyGeneratedArtifacts(to, input());
+    expect(to.steps.at(-1)!.name).toBe('generate-restore-r1');
   });
 
   it('fails with a plain-language reason when the artifact is stale (Builder did not regenerate)', async () => {
