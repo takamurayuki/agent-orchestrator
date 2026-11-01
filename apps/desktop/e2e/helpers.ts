@@ -45,7 +45,8 @@ export async function answerRoundTwo(page: Page, overrides: Partial<Record<'Q-00
   await option(page, 'Q-004', overrides['Q-004'] ?? 'lock_5_15').check();
   await option(page, 'Q-005', overrides['Q-005'] ?? 'route').check();
   await page.getByTestId('answer-round').click();
-  await expect(page.getByTestId('summary-editor')).toBeVisible();
+  // v2.3: 回答が終わると平易な要件サマリー（概要）が先頭に表示される。編集フォームは折りたたみ
+  await expect(page.getByTestId('approval-overview')).toBeVisible();
 }
 
 /** Full happy path up to (not including) the approve click. */

@@ -21,7 +21,11 @@ import { IpcCallError, type IpcMethod, type IpcParams, type IpcResults, type Run
  * - `env=fail`        environment.check reports Docker as failing (canRun=false)
  * - `mockDelay=<ms>`  delay between run state transitions (default 700)
  * - `mockLatency=<ms>` simulated IPC latency per call (default 60)
+ * - `mockRun=needs_human|precheck_failed|completed` which run scenario `run.start` plays (default completed)
+ * - `mockFresh=1`   ignore runs persisted in sessionStorage (terminal runs are persisted so a reload keeps history)
  */
+const STORAGE_KEY = 'agent-orchestrator-mock-runs';
+type RunScenario = 'completed' | 'needs_human' | 'precheck_failed';
 export class MockTransport implements Transport {
   readonly kind = 'mock' as const;
   readonly hasFolderPicker = false;
@@ -29,6 +33,8 @@ export class MockTransport implements Transport {
   private readonly envFail: boolean;
   private readonly stepDelay: number;
   private readonly latency: number;
+  private readonly scenario: RunScenario;
+  private readonly persist: boolean;
   private readonly listeners = new Set<(e: IpcEvent) => void>();
   private readonly drafts = new Map<string, DraftView>();
   private readonly runs = new Map<string, { run: RunStatus; events: RunEvent[]; report: RunReportResult | null; timer: ReturnType<typeof setTimeout> | null }>();
@@ -39,8 +45,21 @@ export class MockTransport implements Transport {
     this.envFail = query.get('env') === 'fail';
     this.stepDelay = Number(query.get('mockDelay') ?? 700);
     this.latency = Number(query.get('mockLatency') ?? 60);
+    const scenario = query.get('mockRun');
+    this.scenario = scenario === 'needs_human' || scenario === 'precheck_failed' ? scenario : 'completed';
+    this.persist = query.get('mockFresh') !== '1';
     for (const { run, report } of seedHistory()) {
       this.runs.set(run.runId, { run, events: [], report, timer: null });
+    }
+    // 再起動（リロード）後も履歴が残ることを UI で検証できるよう、終了した Run は sessionStorage に保存する
+    if (this.persist) {
+      try {
+        const raw = sessionStorage.getItem(STORAGE_KEY);
+        const saved = raw ? (JSON.parse(raw) as Array<{ run: RunStatus; events: RunEvent[]; report: RunReportResult | null }>) : [];
+        for (const e of saved) this.runs.set(e.run.runId, { run: e.run, events: e.events, report: e.report, timer: null });
+      } catch {
+        // storage unavailable → in-memory only
+      }
     }
     queueMicrotask(() => this.emit({ event: 'runner.ready', payload: { version: '0.1.0-mock', pid: 4242 } }));
   }
@@ -335,18 +354,26 @@ export class MockTransport implements Transport {
       const run = entry.run;
       const done = run.state === 'COMPLETED';
       const partial = run.state === 'INTERRUPTED' || run.state === 'NEEDS_HUMAN';
+      const needsHuman = run.state === 'NEEDS_HUMAN';
+      const lastReview = [...entry.events].reverse().find((e) => e.type === 'review.completed');
+      const unverified = needsHuman && Array.isArray(lastReview?.payload['requirementsUnverified']) ? (lastReview!.payload['requirementsUnverified'] as string[]) : [];
       const verificationPassed = entry.events.some((e) => e.type === 'verification.completed' && e.payload['passed'] === true);
       const report: RunReportResult = {
         run,
-        reportMarkdown: reportMarkdown(run, { verificationPassed, findingsCount: done ? 1 : 0, requirementsUnverified: [] }),
+        reportMarkdown: reportMarkdown(run, { verificationPassed, findingsCount: done ? 1 : needsHuman ? 2 : 0, requirementsUnverified: unverified }),
         diffExcerpt: done || partial ? DIFF_EXCERPT : '',
         diffTruncated: false,
         changedFiles: done ? CHANGED_FILES : partial ? CHANGED_FILES.slice(0, 2) : [],
         egress: done || partial
           ? { available: true, allowed: 14, denied: 2, errors: 0, allowedHosts: ['api.anthropic.com', 'chatgpt.com', 'registry.npmjs.org'], deniedHosts: [{ host: 'ab.chatgpt.com', count: 2 }], errorHosts: [] }
           : { available: false, allowed: 0, denied: 0, errors: 0, allowedHosts: [], deniedHosts: [], errorHosts: [] },
-        policyFindings: partial ? [{ ruleId: 'PG-ESLINT-DISABLE', severity: 'blocking', file: 'src/auth/login.ts', line: 12, evidence: '// eslint-disable-next-line no-restricted-syntax', message: '新規の eslint-disable コメント', approved: false, approvalReason: null }] : [],
-        openFindings: done
+        policyFindings: run.state === 'INTERRUPTED' ? [{ ruleId: 'PG-ESLINT-DISABLE', severity: 'blocking', file: 'src/auth/login.ts', line: 12, evidence: '// eslint-disable-next-line no-restricted-syntax', message: '新規の eslint-disable コメント', approved: false, approvalReason: null }] : [],
+        openFindings: needsHuman
+          ? [
+              { id: 'F-003', severity: 'high', file: 'src/server/export/csv.ts', line: 2, description: 'BOM が文字列連結で付与されているが、ストリーミング出力経路（exportLarge）では付与されていない。', recommendation: 'Writable の先頭チャンクで BOM を書き出す共通関数に統一してください。' },
+              { id: 'F-004', severity: 'low', file: 'src/server/export/csv.test.ts', line: 18, description: 'テストが BOM の存在のみを確認し、Excel 互換の改行 (CRLF) を検証していない。', recommendation: 'CRLF の検証ケースを追加してください。' }
+            ]
+          : done
           ? [
               {
                 id: 'F-001',
@@ -358,7 +385,7 @@ export class MockTransport implements Transport {
               }
             ]
           : [],
-        requirementsUnverified: [],
+        requirementsUnverified: unverified,
         reportPath: `${run.runDir}\\report.md`,
         worktreePath: run.worktreePath
       };
@@ -391,10 +418,97 @@ export class MockTransport implements Transport {
     entry.run.state = to;
     this.pushEvent(runId, 'run.state_changed', { from, to }, entry.run.currentRound || null);
     this.emit({ event: 'run.updated', runId, payload: structuredClone(entry.run) as unknown as Record<string, unknown> });
+    if (isTerminal(to)) this.saveTerminalRuns();
+  }
+
+  private saveTerminalRuns(): void {
+    if (!this.persist) return;
+    try {
+      const seeded = new Set(seedHistory().map((s) => s.run.runId));
+      const entries = [...this.runs.values()].filter((e) => isTerminal(e.run.state) && !seeded.has(e.run.runId)).map((e) => ({ run: e.run, events: e.events, report: e.report }));
+      sessionStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
+    } catch {
+      // ignore
+    }
   }
 
   private scheduleRun(runId: string): void {
+    const steps: Array<() => void> = this.scenario === 'precheck_failed' ? this.precheckFailedSteps(runId) : this.scenario === 'needs_human' ? this.needsHumanSteps(runId) : this.completedSteps(runId);
+    let index = 0;
+    const next = () => {
+      const entry = this.runs.get(runId);
+      if (!entry || isTerminal(entry.run.state)) return;
+      const step = steps[index++];
+      if (!step) return;
+      step();
+      if (index < steps.length) entry.timer = setTimeout(next, this.stepDelay);
+      else entry.timer = null;
+    };
+    const entry = this.runs.get(runId);
+    if (entry) entry.timer = setTimeout(next, Math.min(this.stepDelay, 300));
+  }
+
+  /** 起動前検査で失敗（AI は呼ばれない） */
+  private precheckFailedSteps(runId: string): Array<() => void> {
+    return [
+      () => {
+        this.transition(runId, 'PREFLIGHT', { worktreePath: `C:\\Users\\dev\\.agent-orchestrator\\worktrees\\${runId}` });
+        this.pushEvent(runId, 'preflight.completed', { ok: false, failed: ['verification_profile'] });
+      },
+      () => {
+        this.transition(runId, 'PRECHECK_FAILED', {
+          reasonCode: 'PRECHECK_FAILED',
+          reasonDetail: 'ベースライン検証（変更前のリポジトリ）が失敗: lint（exit 1: src/legacy/report.ts に未使用変数）。プロジェクト側で typecheck / lint / test:run が通る状態にしてから再実行してください',
+          finishedAt: new Date().toISOString(),
+          nextActions: ['起動前検査に失敗しました。各チェックの修正方法に従って環境を整えてから再実行してください']
+        });
+      }
+    ];
+  }
+
+  /** 3 ラウンドとも changes_requested → NEEDS_HUMAN / MAX_ROUNDS */
+  private needsHumanSteps(runId: string): Array<() => void> {
     const steps: Array<() => void> = [
+      () => {
+        this.transition(runId, 'PREFLIGHT', { worktreePath: `C:\\Users\\dev\\.agent-orchestrator\\worktrees\\${runId}` });
+        this.pushEvent(runId, 'preflight.completed', { ok: true, failed: [] });
+      }
+    ];
+    for (let round = 1; round <= 3; round++) {
+      steps.push(
+        () => {
+          this.transition(runId, 'IMPLEMENTING', { currentRound: round });
+          this.pushEvent(runId, 'builder.started', { cli: 'claude', version: '2.1.0', attempt: round, hasFeedback: round > 1, feedbackKinds: round > 1 ? { verification: 0, review: 1, policy: 0 } : null }, round);
+        },
+        () => {
+          this.pushEvent(runId, 'builder.completed', { exitCode: 0, durationMs: 180_000, resultExcerpt: 'BOM の付与を修正しました。', costUsd: 0.4 }, round);
+          this.pushEvent(runId, 'diff.collected', { files: 2, additions: 40, deletions: 3, untracked: 0, policyViolations: [] }, round);
+          this.transition(runId, 'VERIFYING');
+        },
+        () => {
+          this.pushEvent(runId, 'verification.completed', { profile: 'node-pnpm', passed: true, commands: [{ name: 'typecheck', exitCode: 0, durationMs: 15_000 }, { name: 'lint', exitCode: 0, durationMs: 8_000 }, { name: 'test:run', exitCode: 0, durationMs: 30_000 }], missing: [] }, round);
+          this.transition(runId, 'REVIEWING');
+          this.pushEvent(runId, 'reviewer.started', { cli: 'codex', version: '0.48.0', readOnly: true }, round);
+        },
+        () => {
+          this.pushEvent(runId, 'review.completed', { verdict: 'changes_requested', findingsCount: 2, blockingFindings: 1, requirementsUnverified: ['Excel で開いた際に文字化けしないこと（BOM 付き UTF-8）'], workspaceHashMatches: true, summary: 'ストリーミング出力経路で BOM が付与されていません。' }, round);
+          if (round === 3) {
+            this.transition(runId, 'NEEDS_HUMAN', {
+              reasonCode: 'MAX_ROUNDS',
+              reasonDetail: 'round 3: レビュー changes_requested（high 1 件）、修正上限に到達',
+              finishedAt: new Date().toISOString(),
+              openBlockingFindings: 1,
+              nextActions: ['修正上限（3 回）に達しました。レポートの失敗理由と指摘を確認し、要件を見直すか手動で修正してください']
+            });
+          }
+        }
+      );
+    }
+    return steps;
+  }
+
+  private completedSteps(runId: string): Array<() => void> {
+    return [
       () => {
         this.transition(runId, 'PREFLIGHT', { worktreePath: `C:\\Users\\dev\\.agent-orchestrator\\worktrees\\${runId}` });
         this.pushEvent(runId, 'preflight.completed', {
@@ -451,18 +565,6 @@ export class MockTransport implements Transport {
         });
       }
     ];
-    let index = 0;
-    const next = () => {
-      const entry = this.runs.get(runId);
-      if (!entry || isTerminal(entry.run.state)) return;
-      const step = steps[index++];
-      if (!step) return;
-      step();
-      if (index < steps.length) entry.timer = setTimeout(next, this.stepDelay);
-      else entry.timer = null;
-    };
-    const entry = this.runs.get(runId);
-    if (entry) entry.timer = setTimeout(next, Math.min(this.stepDelay, 300));
   }
 }
 

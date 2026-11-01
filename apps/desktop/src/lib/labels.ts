@@ -123,12 +123,17 @@ export function formatDuration(ms: number): string {
   return `${h > 0 ? `${h}:` : ''}${mm}:${String(s).padStart(2, '0')}`;
 }
 
-/** Short, safe one-line summary of an event payload (text only). */
+/** AI 出力やコマンド出力の抜粋は秘密情報を含み得るため、イベント要約には載せない（v2.3）。 */
+const HIDDEN_PAYLOAD_KEY = /excerpt|raw|stdout|stderr|output|log$|prompt|result$/i;
+
+/** Short, safe one-line summary of an event payload (text only; raw output fields are hidden). */
 export function summarizePayload(payload: Record<string, unknown>): string {
   const parts: string[] = [];
   for (const [key, value] of Object.entries(payload)) {
     if (value === null || value === undefined) continue;
-    if (typeof value === 'object') {
+    if (HIDDEN_PAYLOAD_KEY.test(key) && typeof value === 'string') {
+      parts.push(`${key}: [非表示 ${value.length} 文字]`);
+    } else if (typeof value === 'object') {
       parts.push(`${key}: ${Array.isArray(value) ? `[${value.length} 件]` : '{…}'}`);
     } else {
       const text = String(value);

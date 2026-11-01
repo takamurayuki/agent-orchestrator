@@ -3,6 +3,7 @@
   import { app } from '../lib/stores/app.svelte';
   import { answerRound, approveAndStart, goBack, reviseDraft } from '../lib/stores/actions';
   import Alert from '../lib/components/Alert.svelte';
+  import ApprovalOverview from '../lib/components/ApprovalOverview.svelte';
   import FactsPanel from '../lib/components/FactsPanel.svelte';
   import QuestionCard from '../lib/components/QuestionCard.svelte';
   import type { QuestionDraftAnswer } from '../lib/components/types';
@@ -18,6 +19,9 @@
   let roundKey = '';
   let consent = $state(false);
   let summaryDirty = $state(false);
+  /** 要件を修正した後は再承認が必要（UI の説明用。承認の可否自体は revision の一致で Runner が判定） */
+  let revisedSinceSummary = $state(false);
+  let editorOpen = $state(false);
 
   $effect(() => {
     const d = app.draft;
@@ -39,6 +43,7 @@
   const canGoBack = $derived((draft?.answers.length ?? 0) > 0 && !draft?.approved && app.busy === null);
   const asking = $derived(draft?.state === 'ASKING' && (draft?.currentQuestions.length ?? 0) > 0);
   const roundCount = $derived(draft ? Math.max(1, Math.ceil(draft.totalQuestionsAsked / 3), draft.round) : 1);
+  const unresolvedContradictions = $derived(draft?.contradictions ?? []);
 
   const approveDisabledReasons = $derived.by(() => {
     const reasons: string[] = [];
@@ -49,6 +54,7 @@
       const titles = blocking.map((id) => draft.askedQuestions.find((q) => q.id === id)?.question ?? id);
       reasons.push(`未回答の必須質問があります: ${titles.join(' / ')}`);
     }
+    if (unresolvedContradictions.length > 0) reasons.push(`未解消の矛盾があります: ${unresolvedContradictions.map((c) => c.description).join(' / ')}`);
     if (asking) reasons.push('現在のラウンドの質問に回答してください');
     if (!draft.proposal) reasons.push('要件サマリーがまだ生成されていません');
     if (draft.verificationReadiness && !draft.verificationReadiness.ready) reasons.push(`検証スクリプトが不足しています: ${draft.verificationReadiness.missingScripts.join(', ')}`);
@@ -70,6 +76,15 @@
       return { questionId: q.id, value, skipped: value === null };
     });
     void answerRound(payload);
+  }
+
+  async function revise(edits: Parameters<typeof reviseDraft>[0]): Promise<boolean> {
+    const ok = await reviseDraft(edits);
+    if (ok) {
+      revisedSinceSummary = true;
+      consent = false; // 内容が変わったので同意も取り直す（再承認）
+    }
+    return ok;
   }
 </script>
 
@@ -130,6 +145,7 @@
               <span class="small muted">未入力の質問はスキップとして送信されます。必須質問をスキップすると要件は確定できません。</span>
             </div>
           </section>
+          <p class="small muted" data-testid="approve-pending-note">すべての質問に回答すると、要件サマリーと「開発を開始」ボタンが表示されます。</p>
         {:else if draft.state === 'BLOCKED'}
           <section class="card actions row">
             <button type="button" onclick={() => void goBack()} disabled={!canGoBack} data-testid="back-round">戻る</button>
@@ -138,65 +154,89 @@
         {:else if draft.proposal && !draft.approved}
           <section class="card actions row">
             <button type="button" onclick={() => void goBack()} disabled={!canGoBack} data-testid="back-round">戻る（質問を修正）</button>
-            <span class="small muted">質問は完了しました。下のサマリーを確認・修正し、承認してください。</span>
+            <span class="small muted">質問は完了しました。要件サマリーを確認し、よければ承認してください。</span>
           </section>
         {/if}
 
-        <section class="card" aria-labelledby="understanding-heading">
-          <h2 id="understanding-heading">現在の要件理解</h2>
-          <p class="small muted">回答のたびに再評価されます。確定事項・選択・推奨・未確定は分けて記録します。</p>
-          <pre data-testid="draft-summary">{draft.summary}</pre>
-          {#if draft.decisions.length > 0}
-            <h3>意思決定ログ</h3>
-            <p class="small muted">質問への回答・矛盾の解消・承認前の修正を記録します。同じ事項の新しい判断が古い判断より優先されます。</p>
-            <ul class="small" data-testid="decision-log">
-              {#each draft.decisions as d (d.topicKey)}
-                <li class:muted={d.status !== 'active'}>
-                  <span class="badge">{d.source === 'interview' ? '質問' : d.source === 'contradiction' ? '矛盾' : '修正'}</span>
-                  <strong>{d.topicKey}</strong>: {d.question} → <strong>{d.chosenLabel}</strong>
-                  {#if d.status === 'retracted'}<span class="badge">取り消し</span>{:else if d.status === 'superseded'}<span class="badge">{d.supersededBy} で置き換え</span>{/if}
-                  {#if d.consequence}<span class="muted">（{d.consequence}）</span>{/if}
-                  {#if d.relatedRequirements.length > 0}<span class="muted"> 対象: {d.relatedRequirements.join(' / ')}</span>{/if}
-                  {#if d.history.length > 0}<span class="muted"> 履歴 {d.history.length} 件</span>{/if}
-                </li>
-              {/each}
-            </ul>
-          {/if}
-        </section>
+        {#if !asking}
+          <!-- 1. 要件サマリー（平易な概要）を最初に -->
+          <ApprovalOverview {draft} />
 
-        <SummaryEditor {draft} disabled={app.busy !== null || draft.approved} onRevise={reviseDraft} onDirtyChange={(d) => (summaryDirty = d)} />
-
-        <section class="card" aria-labelledby="approve-heading" data-testid="approve-section">
-          <h2 id="approve-heading">承認して開発を開始</h2>
-          <Alert tone="info" title="データの取り扱い">
-            <p class="small">承認すると task.yaml を固定し、隔離されたワークツリーと Docker コンテナ内で Claude Code による実装、検証、Codex によるレビューを行います。この過程で<strong>リポジトリの内容（コード・設定）がモデル提供者へ送信される</strong>可能性があります。機密リポジトリの場合は事前に確認してください。push / merge / deploy は行いません。</p>
-          </Alert>
-          <div class="consent">
-            <input type="checkbox" id="consent" bind:checked={consent} disabled={draft.approved} data-testid="consent" />
-            <label for="consent">リポジトリの内容がモデルに送信されることに同意する</label>
-          </div>
-          <div class="row">
-            <button type="button" class="primary" onclick={() => void approveAndStart()} disabled={!canApprove} aria-describedby="approve-reasons" data-testid="approve">この内容で開発を開始</button>
-          </div>
-          <div id="approve-reasons" class="small" data-testid="approve-reasons">
-            {#if approveDisabledReasons.length > 0}
-              <p class="muted">開始できない理由:</p>
-              <ul>
-                {#each approveDisabledReasons as reason, i (i)}
-                  <li>{reason}</li>
-                {/each}
-              </ul>
-            {:else}
-              <p class="muted">承認可能です。ボタンを押すと task.yaml（リビジョン {draft.revision}）が固定され、Run が開始されます。</p>
+          <!-- 2. 承認 -->
+          <section class="card" aria-labelledby="approve-heading" data-testid="approve-section">
+            <h2 id="approve-heading">承認して開発を開始</h2>
+            {#if revisedSinceSummary && !draft.approved}
+              <Alert tone="info" role="status" title="要件を変更したため再承認が必要です" message={`リビジョン ${draft.revision} の内容を確認し、同意のチェックを入れ直してから承認してください。`} testid="reapproval-note" />
             {/if}
-          </div>
-          {#if draft.approved && draft.taskYaml}
-            <details>
-              <summary>固定された task.yaml</summary>
-              <pre>{draft.taskYaml}</pre>
+            <p class="small">承認すると、上の要件サマリーの内容が固定され、隔離された環境で AI による実装・検証・レビューが始まります。最大 {3} 回の修正ラウンドを行い、終わると結果画面に移ります。所要時間は依頼の大きさと AI の応答により変わります（数分〜数十分）。AI の利用料金が発生します。</p>
+            <Alert tone="info" title="データの取り扱い">
+              <p class="small">この過程で<strong>リポジトリの内容（コード・設定）がモデル提供者へ送信される</strong>可能性があります。機密リポジトリの場合は事前に確認してください。push / merge / deploy は行いません。</p>
+            </Alert>
+            <div class="consent">
+              <input type="checkbox" id="consent" bind:checked={consent} disabled={draft.approved} data-testid="consent" />
+              <label for="consent">リポジトリの内容がモデルに送信されることに同意する</label>
+            </div>
+            <div class="row">
+              <button type="button" class="primary" onclick={() => void approveAndStart()} disabled={!canApprove} aria-describedby="approve-reasons" data-testid="approve">この内容で開発を開始</button>
+            </div>
+            <div id="approve-reasons" class="small" data-testid="approve-reasons">
+              {#if approveDisabledReasons.length > 0}
+                <p class="muted">開始できない理由:</p>
+                <ul>
+                  {#each approveDisabledReasons as reason, i (i)}
+                    <li>{reason}</li>
+                  {/each}
+                </ul>
+              {:else}
+                <p class="muted">承認できます。ボタンを押すと要件（リビジョン {draft.revision}）が固定され、実行が始まります。</p>
+              {/if}
+            </div>
+          </section>
+
+          <!-- 3. 修正（必要な場合だけ開く） -->
+          {#if draft.proposal}
+            <details class="card" bind:open={editorOpen} data-testid="summary-editor-details">
+              <summary data-testid="edit-summary">要件を修正する（要件・対象外・実装方針・受入条件を直接編集）</summary>
+              <p class="small muted">修正して保存すると新しいリビジョンになり、承認は取り直しになります。</p>
+              <SummaryEditor {draft} disabled={app.busy !== null || draft.approved} onRevise={revise} onDirtyChange={(d) => (summaryDirty = d)} />
             </details>
           {/if}
-        </section>
+        {/if}
+
+        <!-- 4. AI の要件理解・判断の記録（質問中は常時表示、承認時は折りたたみ） -->
+        {#if asking}
+          <section class="card" aria-labelledby="understanding-heading">
+            <h2 id="understanding-heading">現在の要件理解</h2>
+            <p class="small muted">回答のたびに再評価されます。確定事項・選択・推奨・未確定は分けて記録します。</p>
+            <pre data-testid="draft-summary">{draft.summary}</pre>
+          </section>
+        {:else}
+          <details class="card" data-testid="understanding-details">
+            <summary>AI の要件理解と判断の記録（技術情報）</summary>
+            <h3>現在の要件理解</h3>
+            <pre data-testid="draft-summary">{draft.summary}</pre>
+            {#if draft.decisions.length > 0}
+              <h3>意思決定ログ</h3>
+              <p class="small muted">質問への回答・矛盾の解消・承認前の修正を記録します。同じ事項の新しい判断が古い判断より優先されます。</p>
+              <ul class="small" data-testid="decision-log">
+                {#each draft.decisions as d (d.topicKey)}
+                  <li class:muted={d.status !== 'active'}>
+                    <span class="badge">{d.source === 'interview' ? '質問' : d.source === 'contradiction' ? '矛盾' : '修正'}</span>
+                    <strong>{d.topicKey}</strong>: {d.question} → <strong>{d.chosenLabel}</strong>
+                    {#if d.status === 'retracted'}<span class="badge">取り消し</span>{:else if d.status === 'superseded'}<span class="badge">{d.supersededBy} で置き換え</span>{/if}
+                    {#if d.consequence}<span class="muted">（{d.consequence}）</span>{/if}
+                    {#if d.relatedRequirements.length > 0}<span class="muted"> 対象: {d.relatedRequirements.join(' / ')}</span>{/if}
+                    {#if d.history.length > 0}<span class="muted"> 履歴 {d.history.length} 件</span>{/if}
+                  </li>
+                {/each}
+              </ul>
+            {/if}
+            {#if draft.approved && draft.taskYaml}
+              <h3>固定された task.yaml</h3>
+              <pre>{draft.taskYaml}</pre>
+            {/if}
+          </details>
+        {/if}
       </div>
 
       <aside class="stack">

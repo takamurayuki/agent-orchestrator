@@ -9,6 +9,8 @@ test.describe('UI-08 承認後', () => {
     await expect(page.getByTestId('nav-running')).toHaveAttribute('aria-current', 'page');
     await expect(page.getByTestId('run-id')).not.toBeEmpty();
 
+    // v2.3: task.yaml は「技術情報」の折りたたみの中
+    await page.getByTestId('run-technical').locator('summary').first().click();
     const yaml = page.getByTestId('fixed-yaml');
     await expect(yaml).toBeVisible();
     await yaml.locator('summary').click();
@@ -113,7 +115,7 @@ test.describe('UI-10 キーボード操作', () => {
     await page.keyboard.press('Space');
     await tabTo(page, '[data-testid="answer-round"]');
     await page.keyboard.press('Enter');
-    await expect(page.getByTestId('summary-editor')).toBeVisible();
+    await expect(page.getByTestId('approval-overview')).toBeVisible();
 
     // Consent + approve
     await tabTo(page, '[data-testid="consent"]');

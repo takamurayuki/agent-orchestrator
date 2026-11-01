@@ -217,3 +217,9 @@ SPEC.md を唯一の要件ベースラインとし、契約の曖昧さ・不整
 - **決定:** `PG-VERIFY-SCRIPT` は変更を機械的に分類する。削除・no-op 化（`echo` / `true` / 空）は blocking。旧コマンド全体が新コマンドに含まれ `&&` / `;` で別コマンドが追加された、または厳格化フラグ（`--max-warnings 0`、`--strict`、`--noEmit`、`--frozen-lockfile`、`--coverage`、`--run`、`--bail` 等）だけが追加された場合は「強化」として **warning**（完了は妨げないが内容を提示）。それ以外（`eslint .` → `eslint src`、`--passWithNoTests` の追加など）は強化と機械的に判断できないため blocking とし、人間がベースコミットの `.agent-orchestrator/policy.json` に例外を登録しない限り通さない。AI（Builder / Reviewer）はいかなる経路でも例外を承認できない。
 - **理由:** v2.1 は検証 scripts のあらゆる変更を blocking にしていたため、正当な強化（自リポジトリのコミット c91bd00）も差し戻された。一方で `eslint src` のような対象の縮小は「弱体化」だが文字列からは安全に判定できないので、安全側（人間の承認）に倒す。
 - **検証:** `policy-gate.test.ts` v2.2 Phase 4（分類・warning の内容提示・unknown は blocking・例外で通過）。
+
+## D-35 UI は Runner の状態を変えずに「平易な説明」へ変換する（v2.3）
+
+- **決定:** 結果・進捗の表示は `apps/desktop/src/lib/outcome.ts` の純粋関数（`describeOutcome` / `describeActivity` / `severityImpact`）で state・reasonCode・イベントを平易な日本語（見出し・原因・変更の状態・次にできること）に変換する。バックエンドの状態遷移・reasonCode・nextActions は変更しない（nextActions は「技術者向け」として折りたたみに残す）。元プロジェクトへの反映機能は未実装のため、反映ボタンは表示せず、GUI から安全な操作（変更内容を見る / 作業用コピーのパスをコピー / 新しい依頼）だけを出す。実行画面は AI 出力・コマンド出力の生ログを表示せず、イベント要約でも `excerpt / raw / stdout / stderr / output / log / prompt / result` 系のフィールドは「[非表示 N 文字]」に伏せる。
+- **理由:** v2.2 の UX レビュー（P0: 次の手動操作が CLI 前提、P1: 承認画面の長さ・進捗の不透明さ）。状態機械や Policy Gate を UI の都合で緩めない、という制約の下で、表示層だけで改善する。
+- **検証:** モックに `mockRun=needs_human|precheck_failed` と終了 Run の sessionStorage 永続化を加え、`ui-11-14.spec.ts` で COMPLETED / NEEDS_HUMAN / PRECHECK_FAILED の表示、承認前後の遷移と再承認、進捗の「現在の処理」、リロード後の履歴を検証。既存の Playwright 13 件は維持（折りたたみ化に伴う locator の調整のみ）。

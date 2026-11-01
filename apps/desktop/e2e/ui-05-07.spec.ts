@@ -48,6 +48,8 @@ test.describe('UI-06 戻って修正', () => {
     await expect(page.getByTestId('draft-summary')).toContainText('スコープ: 新規登録も含める');
 
     await answerRoundTwo(page);
+    await expect(page.getByTestId('approval-overview')).toContainText('新規登録');
+    await page.getByTestId('edit-summary').click();
     const editor = page.getByTestId('summary-editor');
     await expect(editor.getByTestId('summary-title')).toContainText('新規登録');
     const requirements = await editor.getByTestId('requirement-input').evaluateAll((els) => els.map((e) => (e as HTMLInputElement).value));
@@ -56,10 +58,12 @@ test.describe('UI-06 戻って修正', () => {
 
   test('UI-06: 要件サマリーを修正すると新しいリビジョンになり承認がリセットされる', async ({ page }) => {
     await reachApproval(page);
-    await expect(page.getByTestId('summary-editor')).toContainText('リビジョン 1');
+    await expect(page.getByTestId('approval-overview')).toContainText('リビジョン 1');
     await page.getByTestId('consent').check();
     await expect(page.getByTestId('approve')).toBeEnabled();
 
+    await page.getByTestId('edit-summary').click();
+    await expect(page.getByTestId('summary-editor')).toContainText('リビジョン 1');
     await page.getByTestId('add-requirement').click();
     await page.getByTestId('requirement-input').last().fill('ログイン成功時に監査ログを記録する');
     await expect(page.getByTestId('summary-dirty')).toBeVisible();
@@ -70,6 +74,10 @@ test.describe('UI-06 戻って修正', () => {
     await page.getByTestId('save-revision').click();
     await expect(page.getByTestId('summary-editor')).toContainText('リビジョン 2');
     await expect(page.getByTestId('summary-dirty')).toHaveCount(0);
+    // v2.3: 要件を変更したので再承認（同意の取り直し）が必要
+    await expect(page.getByTestId('reapproval-note')).toBeVisible();
+    await expect(page.getByTestId('approve')).toBeDisabled();
+    await page.getByTestId('consent').check();
     await expect(page.getByTestId('approve')).toBeEnabled();
   });
 });
