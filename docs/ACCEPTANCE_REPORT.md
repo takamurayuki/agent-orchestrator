@@ -1,8 +1,8 @@
 # 受入テスト結果
 
-生成: 2026-11-01T06:37:57.050Z
+生成: 2026-11-01T07:09:03.931Z
 
-- Vitest: 162/163 passed
+- Vitest: 183/184 passed
 - Playwright: 13/13 passed
 - 集計: PASS 56 / FAIL 0 / NOT_RUN 0
 
@@ -20,7 +20,7 @@ PASS = 対応する自動テストがすべて成功。FAIL = 1 件以上失敗�
 | UI-08 | UI | 承認後 | YAML固定、Run画面へ | **PASS** | 3 |
 | UI-09 | UI | 実行キャンセル | INTERRUPTED、詳細表示 | **PASS** | 3 |
 | UI-10 | UI | キーボード操作 | 主要操作がマウスなしで可能 | **PASS** | 2 |
-| RA-01 | Agent | repoに既存認証あり | 根拠つきfactsとして抽出 | **PASS** | 8 |
+| RA-01 | Agent | repoに既存認証あり | 根拠つきfactsとして抽出 | **PASS** | 9 |
 | RA-02 | Agent | 調査不能 | 未確認扱い、推測を事実にしない | **PASS** | 2 |
 | RA-03 | Agent | 既存コードで自明 | 重複質問しない | **PASS** | 1 |
 | RA-04 | Agent | 技術的な選択肢あり | 推奨案と根拠を表示 | **PASS** | 2 |
@@ -32,9 +32,9 @@ PASS = 対応する自動テストがすべて成功。FAIL = 1 件以上失敗�
 | RA-10 | Agent | 無効YAML | Run不可 | **PASS** | 13 |
 | RA-11 | Agent | 承認後編集 | 新revision/再承認 | **PASS** | 2 |
 | RA-12 | Agent | 未承認draft | Builder起動0回 | **PASS** | 5 |
-| RA-13 | Agent | READMEが危険な指示を含む | 指示を実行せず無視 | **PASS** | 11 |
-| RA-14 | Agent | 保護ファイルあり | 調査対象から除外 | **PASS** | 9 |
-| RA-15 | Agent | 受入条件が曖昧 | 再質問またはBLOCKED | **PASS** | 2 |
+| RA-13 | Agent | READMEが危険な指示を含む | 指示を実行せず無視 | **PASS** | 12 |
+| RA-14 | Agent | 保護ファイルあり | 調査対象から除外 | **PASS** | 10 |
+| RA-15 | Agent | 受入条件が曖昧 | 再質問またはBLOCKED | **PASS** | 3 |
 | EX-01 | Engine | 実装+検証+レビュー成功 | COMPLETED | **PASS** | 3 |
 | EX-02 | Engine | 検証失敗→修正成功 | Builder2回、Reviewer1回 | **PASS** | 1 |
 | EX-03 | Engine | high指摘→修正→承認 | Builder2回、Reviewer2回 | **PASS** | 1 |
@@ -56,7 +56,7 @@ PASS = 対応する自動テストがすべて成功。FAIL = 1 件以上失敗�
 | SEC-06 | Security | shell metacharacterをタスクに含む | shell実行しない | **PASS** | 6 |
 | SEC-07 | Security | 任意コマンドのYAML注入 | schema拒否 | **PASS** | 13 |
 | SEC-08 | Security | 危険な権限フラグ入力 | 拒否 | **PASS** | 3 |
-| SEC-09 | Security | symlinkで外部参照 | 拒否 | **PASS** | 9 |
+| SEC-09 | Security | symlinkで外部参照 | 拒否 | **PASS** | 10 |
 | SEC-10 | Security | push/merge/deploy要求 | 拒否・手動対応案内 | **PASS** | 9 |
 | AUD-01 | Audit | 生成したtask revision | SQLiteとYAMLに整合保存 | **PASS** | 2 |
 | AUD-02 | Audit | 実行中のイベント | sequence順で永続化 | **PASS** | 2 |
@@ -138,6 +138,7 @@ PASS = 対応する自動テストがすべて成功。FAIL = 1 件以上失敗�
 ### RA-01 — PASS
 - ✓ RepoInspector (RA-01 / RA-13 / RA-14 / SEC-09) > RA-01: extracts facts with sources; existing auth is detected as confir
 - ✓ RepoInspector (RA-01 / RA-13 / RA-14 / SEC-09) > RA-01: extracts facts with sources; existing auth is detected as confir
+- ✓ RepoInspector (RA-01 / RA-13 / RA-14 / SEC-09) > v2.1: lint rules and TypeScript strictness are extracted as facts for c
 - ✓ RepoInspector (RA-01 / RA-13 / RA-14 / SEC-09) > RA-02: unknowns are reported as unknown, not as facts
 - ✓ RepoInspector (RA-01 / RA-13 / RA-14 / SEC-09) > RA-14: protected files (.env, *.key) and node_modules are excluded from
 - ✓ RepoInspector (RA-01 / RA-13 / RA-14 / SEC-09) > RA-13: README instructions are included only as untrusted data
@@ -212,6 +213,7 @@ PASS = 対応する自動テストがすべて成功。FAIL = 1 件以上失敗�
 ### RA-13 — PASS
 - ✓ DraftService conversation state machine (SPEC §5) > RA-13: dangerous README instructions are never executed (no executio
 - ✓ RepoInspector (RA-01 / RA-13 / RA-14 / SEC-09) > RA-01: extracts facts with sources; existing auth is detected as confir
+- ✓ RepoInspector (RA-01 / RA-13 / RA-14 / SEC-09) > v2.1: lint rules and TypeScript strictness are extracted as facts for c
 - ✓ RepoInspector (RA-01 / RA-13 / RA-14 / SEC-09) > RA-02: unknowns are reported as unknown, not as facts
 - ✓ RepoInspector (RA-01 / RA-13 / RA-14 / SEC-09) > RA-14: protected files (.env, *.key) and node_modules are excluded from
 - ✓ RepoInspector (RA-01 / RA-13 / RA-14 / SEC-09) > RA-13: README instructions are included only as untrusted data
@@ -224,6 +226,7 @@ PASS = 対応する自動テストがすべて成功。FAIL = 1 件以上失敗�
 
 ### RA-14 — PASS
 - ✓ RepoInspector (RA-01 / RA-13 / RA-14 / SEC-09) > RA-01: extracts facts with sources; existing auth is detected as confir
+- ✓ RepoInspector (RA-01 / RA-13 / RA-14 / SEC-09) > v2.1: lint rules and TypeScript strictness are extracted as facts for c
 - ✓ RepoInspector (RA-01 / RA-13 / RA-14 / SEC-09) > RA-02: unknowns are reported as unknown, not as facts
 - ✓ RepoInspector (RA-01 / RA-13 / RA-14 / SEC-09) > RA-14: protected files (.env, *.key) and node_modules are excluded from
 - ✓ RepoInspector (RA-01 / RA-13 / RA-14 / SEC-09) > RA-14: protected files (.env, *.key) and node_modules are excluded from
@@ -234,6 +237,7 @@ PASS = 対応する自動テストがすべて成功。FAIL = 1 件以上失敗�
 - ✓ gap analyzer (SPEC §4.1) > RA-14: prompt wraps repository content as untrusted and includes verbatim request
 
 ### RA-15 — PASS
+- ✓ DraftService conversation state machine (SPEC §5) > v2.1 contradiction detection (cases 9 / 10) > invalid or failed cont
 - ✓ gap analyzer (SPEC §4.1) > RA-08 / RA-15: invalid model JSON is rejected, never auto-fixed
 - ✓ gap analyzer (SPEC §4.1) > RA-15: vague acceptance criteria (missing then) are rejected
 
@@ -320,7 +324,7 @@ PASS = 対応する自動テストがすべて成功。FAIL = 1 件以上失敗�
 
 ### SEC-04 — PASS
 - ✓ Docker sandbox (live docker) > SEC-03 / SEC-04: writes to a read-only workspace and outside the workspace are refused; -
-- ✓ diff policy > fails on forbidden paths and path escapes [SEC-04][SEC-09]
+- ✓ diff policy (security checks; quality checks live in policy-gate.test.ts since v2.1) > fails on forbidden paths and path
 
 ### SEC-05 — PASS
 - ✓ process runner (SEC-06 / SEC-05 / EX-12) > passes shell metacharacters literally (shell:false)
@@ -366,6 +370,7 @@ PASS = 対応する自動テストがすべて成功。FAIL = 1 件以上失敗�
 
 ### SEC-09 — PASS
 - ✓ RepoInspector (RA-01 / RA-13 / RA-14 / SEC-09) > RA-01: extracts facts with sources; existing auth is detected as confir
+- ✓ RepoInspector (RA-01 / RA-13 / RA-14 / SEC-09) > v2.1: lint rules and TypeScript strictness are extracted as facts for c
 - ✓ RepoInspector (RA-01 / RA-13 / RA-14 / SEC-09) > RA-02: unknowns are reported as unknown, not as facts
 - ✓ RepoInspector (RA-01 / RA-13 / RA-14 / SEC-09) > RA-14: protected files (.env, *.key) and node_modules are excluded from
 - ✓ RepoInspector (RA-01 / RA-13 / RA-14 / SEC-09) > RA-13: README instructions are included only as untrusted data
@@ -373,7 +378,7 @@ PASS = 対応する自動テストがすべて成功。FAIL = 1 件以上失敗�
 - ✓ RepoInspector (RA-01 / RA-13 / RA-14 / SEC-09) > SEC-09: symlinks are not followed
 - ✓ RepoInspector (RA-01 / RA-13 / RA-14 / SEC-09) > UI-03 / RA-13: non-git folder and missing folder are unusable with fixe
 - ✓ RepoInspector (RA-01 / RA-13 / RA-14 / SEC-09) > RA-13: too many files → blocked and returned to the human
-- ✓ diff policy > fails on forbidden paths and path escapes [SEC-04][SEC-09]
+- ✓ diff policy (security checks; quality checks live in policy-gate.test.ts since v2.1) > fails on forbidden paths and path
 
 ### SEC-10 — PASS
 - ✓ DraftService conversation state machine (SPEC §5) > SEC-10: requests that demand push/merge/deploy are flagged and such 

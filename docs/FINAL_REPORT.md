@@ -2,6 +2,47 @@
 
 作成日: 2026-11-01（リリース準備フェーズ後に更新）　対象: `docs/SPEC.md` v2.0　受入結果: `docs/ACCEPTANCE_REPORT.md`（**PASS 56 / FAIL 0 / NOT_RUN 0**）
 
+## 0″. v2.1 品質保証強化の結果（2026-11-01 追記）
+
+### Phase 1 Policy Gate（P0）— 実装済み（D-29）
+
+- `apps/runner/src/policy-gate.ts`: ベースコミットと作業ツリーの**内容の多重集合**比較で「新規」だけを検出する 8 ルール（新規 eslint-disable、新規 @ts-ignore/@ts-nocheck、テスト skip/only/todo 追加、テストファイル削除、必須検証 scripts の削除・無効化・変更、tsconfig の strict 緩和・exclude 追加、ESLint ルール off 化・格下げ・ignores 追加、Vitest/Jest/Playwright の除外追加・passWithNoTests）。コメント・テスト構文・設定は TypeScript コンパイラ API（パーサ駆動のコメント範囲、AST、JSONC パーサ）で判定し、文字列内の一致は無視。
+- 検出結果は `ruleId / file / line / evidence / message / approved` を持ち、`rounds/<n>/policy.json`、`policy.gate` イベント、report.md、結果画面「Policy Gate」に表示。
+- 未承認 blocking → 検証・レビューを飛ばして Builder に差し戻し（残試行があれば）、上限で `NEEDS_HUMAN / POLICY_VIOLATION`。完了ゲート 7 でも不合格にするため Reviewer の approved で上書き不可。例外は**ベースコミット**の `.agent-orchestrator/policy.json`（理由必須、glob 可）のみ。作業ツリー側（AI が書いた内容）は無視。
+- 従来の regex 差分ポリシーはセキュリティ系（worktree 外・禁止パス）だけを残す。
+
+### Phase 2 Requirements Agent の矛盾検出（P0）— 実装済み（D-30）
+
+- 素案確定後に矛盾検出（`contradiction.schema.json`）を実行。要件同士 / 要件と既存コード・設定の矛盾を `blocking | minor` で分類し、blocking は根拠・選択肢・影響付きの blocking 質問（`CONTRA-*`）として差し戻す。解消するまで承認不可、スキップは BLOCKED、質問上限超過は BLOCKED。
+- `RepoInspector` が ESLint ルール（error / off、`no-restricted-*` のメッセージ、ignores）と tsconfig の strict フラグを facts として抽出し、ヒアリング（ラウンド 1）でも矛盾が質問される。
+- 判断は意思決定ログ（SQLite `decisions`、`tasks/<id>/revisions/<rev>/decisions.json`、DraftView.decisions、画面「意思決定ログ」）に保存し、再検出時に既決定として渡す。
+
+### Phase 3 回帰テスト — 10 ケースすべて追加・PASS
+
+| # | ケース | テスト |
+|---|---|---|
+| 1 | eslint-disable の新規追加を検出 | `policy-gate.test.ts` case 1 |
+| 2 | 既存の eslint-disable は誤検出しない（移動・同一コメント増分） | case 2 |
+| 3 | @ts-ignore / @ts-nocheck 検出（@ts-expect-error は許容） | case 3 |
+| 4 | skip / only / xit / todo の追加検出（AST、文字列内は無視） | case 4 |
+| 5 | テスト削除の検出 | case 5 |
+| 6 | 検証設定の緩和（scripts / tsconfig / ESLint / Vitest） | case 6 群 |
+| 7 | 未承認違反があると完了しない（3 ラウンド差し戻し → NEEDS_HUMAN、Reviewer approved でも不合格） | `engine.test.ts` v2.1 case 7、gate 7 |
+| 8 | 違反を修正すると完了できる | `engine.test.ts` v2.1 case 8 |
+| 9 | 矛盾した要件はユーザーに差し戻される | `draft-service.test.ts` case 9 |
+| 10 | 矛盾解消後は YAML を生成できる（意思決定ログ付き） | `draft-service.test.ts` case 10 |
+
+追加: ベースコミットの例外のみ有効（AI が作業ツリーに置いた例外は無効）、trailing コメントの回帰、テンプレートリテラル内の文字列は無視、minor 矛盾は openItems、矛盾出力の不正は BLOCKED。
+
+### Phase 4 検証と記録
+
+- 回帰: Vitest 183（実 Docker 7 含む）、Playwright 13、tsc / svelte-check / cargo check / eslint クリーン、受入 PASS 56 / 0 / 0。
+- 偽陽性・偽陰性の調査（`scripts/policy-gate-audit.mjs`、`docs/QUALITY_REPORT.md`）: ドッグフーディング 14 ワークスペースと自リポジトリ直近 12 コミットにゲートを適用。AI 生成差分の真陽性 2（旧 `eslint-disable-next-line`、新 `eslint-disable-line`）、偽陽性 0。自作コミットでは `PG-VERIFY-SCRIPT` 1 件（検証 scripts の強化変更を設計どおり保守的に検出）。
+- **実 CLI 検証 1 回目で偽陰性を発見・修正:** 依頼と lint 規約が矛盾するシナリオで、Builder が `return \`...\`; // eslint-disable-line no-restricted-syntax`（行末コメント）を書き、初版の scanner 実装が取り逃がして COMPLETED になった。パーサ駆動のコメント収集に修正し、回帰テストと監査で検出を確認（D-29 追記）。
+- **実 CLI 検証 2 回目（修正後、同じ矛盾依頼・新規サンプルリポジトリ）:** ヒアリングのラウンド 1 で「必ずテンプレートリテラル」と `no-restricted-syntax` の矛盾が blocking 質問として提示され、選択肢は `concat（規約に従う）/ exception（人間が policy.json に例外登録）/ disable_rule（Policy Gate で阻止される旨を明示）` の順。規約に従う選択で Builder は文字列連結で実装し、eslint-disable なし、Policy Gate 0 件、検証 PASS、Codex approved → COMPLETED（1 ラウンド、244 s、Builder $0.06）。人間レビューも approved。
+- **未観測:** 実 CLI で Policy Gate が blocking を出して Builder に差し戻し、修正後に完了する経路。モックテスト（case 7 / 8）で検証済み。実 AI 出力に対する検出自体は監査（旧 `eslint-disable-next-line`、新 `eslint-disable-line`）で確認。
+- **残課題:** ヒアリング（通常質問）で解消された矛盾は回答履歴に残るが意思決定ログには記録されない（CONTRA- 質問のみ）。`PG-VERIFY-SCRIPT` は検証 scripts の強化変更も検出するため、意図した変更には例外登録が必要。Policy Gate は TS/JS/JSON 設定のみ対象（Python 等は対象外）。
+
 ## 0′. ドッグフーディング・品質検証フェーズの結果（2026-11-01 追記）
 
 詳細指標は `docs/QUALITY_REPORT.md`（`scripts/quality-report.mjs` が `test-results/dogfood/*.json` と `docs/dogfood-review.json` から生成）。

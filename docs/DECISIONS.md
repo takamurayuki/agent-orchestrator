@@ -169,6 +169,7 @@ SPEC.md を唯一の要件ベースラインとし、契約の曖昧さ・不整
 - **運用:** 未承認 blocking があれば検証・レビューを行わず Builder に差し戻す（残試行があれば。無ければ `NEEDS_HUMAN / POLICY_VIOLATION`）。完了ゲート 7 でも未承認 blocking を不合格にするため、Reviewer の `approved` では上書きできない。例外は**ベースコミット**の `.agent-orchestrator/policy.json`（`{"allow":[{"ruleId","file"(glob),"reason"}]}`）からのみ読み、作業ツリー側（= AI が今回の Run で書いた内容）は無視する。従来の regex ベースの差分ポリシー（`policy.ts`）はセキュリティ系（worktree 外・禁止パス）だけを残し即時停止とする。
 - **理由:** ドッグフーディングで Builder が依頼と規約の矛盾を `eslint-disable-next-line` で回避し、Codex がそれを指摘せず approved になった（人間レビューと唯一不一致）。AI 同士の合意に依存しない機械的なゲートが必要。regex では文字列内の一致や既存違反の再検出で偽陽性が出るため AST を使う。
 - **影響・対処:** TypeScript が runner の実行時依存になる（SEA バンドルが約 9 MB 増）。偽陽性・偽陰性の調査結果は `docs/QUALITY_REPORT.md` に記録。回帰テスト `policy-gate.test.ts`、`engine.test.ts`。
+- **実機で見つけた偽陰性と修正:** 初版は `ts.createScanner().scan()` のループでコメントを集めていたが、テンプレートリテラルの `${}` 以降を素の scanner は正しく字句解析できず、`return \`...${x}...\`; // eslint-disable-line no-restricted-syntax` という**行末コメント**を取り逃がして Run が COMPLETED になった（v2.1 実 CLI 検証 1 回目）。パーサ駆動（全ノード/トークンの leading / trailing comment range）に変更し、回帰テストと `scripts/policy-gate-audit.mjs` の再実行で検出を確認した。
 
 ## D-30 Requirements Agent の矛盾検出と意思決定ログ（v2.1）
 
