@@ -2,7 +2,7 @@
 
 実施日: 2026-11-01　対象ビルド: `Agent Orchestrator_0.1.0_x64-setup.exe`（SHA-256 `55B4E4DC3D7B4969113B96CD2E0D30F7445E4636D298D98C31418AB9A28BC52A`、コミット `2e5ee75` 時点の配布物）　実施者: 実装者 1 名（開発機 1 台）
 
-> 本フェーズで**実施できなかった項目は未検証・未実施として記載**している。PASS と書いた項目はすべて本セッションで実測したものに限る。テスト結果は改変していない（生ログ: `test-results/dogfood/lb-*.json`、`.tmp/lb-dogfood.log`）。
+> 本フェーズで**実施できなかった項目は未検証・未実施として記載**している。PASS と書いた項目はすべて本セッションで実測したものに限る。テスト結果は改変していない（生ログ: `test-results/dogfood/lb-*.json` と `.tmp/lb-dogfood.log`。いずれも gitignore 対象でローカルにのみ保存。集計は `docs/QUALITY_REPORT.md` と `docs/dogfood-review.json` にコミット）。
 
 ## Phase 1: 配布環境の検証
 
