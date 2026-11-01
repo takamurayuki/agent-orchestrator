@@ -14,6 +14,13 @@ describe('prohibited operations [SEC-10]', () => {
 
   it('does not flag ordinary requests', () => {
     expect(detectProhibitedOperations('メールアドレスとパスワードでログインできるようにしたい')).toEqual([]);
+    // β版検証で見つけた偽陽性: サービス名だけでは外部送信と判定しない
+    expect(detectProhibitedOperations('maskSecrets に Slack のトークン（xoxb- で始まる）をマスキングするパターンを追加してテストも追加')).toEqual([]);
+    expect(detectProhibitedOperations('Microsoft Teams の会議 URL を正規化する関数を追加')).toEqual([]);
+    expect(detectProhibitedOperations('完了したら Slack に投稿する').map((o) => o.code)).toContain('EXTERNAL_POST');
+    expect(detectProhibitedOperations('エラー時に Discord へ通知を送る').map((o) => o.code)).toContain('EXTERNAL_POST');
+    expect(detectProhibitedOperations('post a summary to Slack when the build finishes').map((o) => o.code)).toContain('EXTERNAL_POST');
+    expect(detectProhibitedOperations('Teams の webhook に結果を送信する').map((o) => o.code)).toContain('EXTERNAL_POST');
   });
 });
 

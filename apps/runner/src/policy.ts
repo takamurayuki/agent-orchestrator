@@ -17,7 +17,13 @@ const PROHIBITED_PATTERNS: Array<{ code: ProhibitedOperation['code']; re: RegExp
   { code: 'PUSH', re: /\bgit\s+push\b|\bpush\s+(to|it|them|the)\b|push\s*(して|し|する)|プッシュ|リモートに(反映|送信|アップ)/i, guidance: 'push はツールが行いません。結果の worktree を確認後、手動で git push してください。' },
   { code: 'MERGE', re: /\bgit\s+merge\b|\bmerge\s+(to|into|it|the)\b|merge\s*(して|し|する)|マージ|\bPR\s*(を|作成|作って)|\bpull\s*request\b|プルリク/i, guidance: 'merge / PR 作成はツールが行いません。差分を確認後、手動で行ってください。' },
   { code: 'DEPLOY', re: /\bdeploy\b|デプロイ|本番(に|へ)(反映|公開|リリース)|\brelease\s+to\s+prod\b|\bpublish\s+to\b/i, guidance: 'deploy はツールが行いません。手動のリリース手順に従ってください。' },
-  { code: 'EXTERNAL_POST', re: /\b(slack|twitter|discord|teams)\b|\bx\.com\b|メール(で|を)送(信|って)|投稿して|ツイート|\bsend\s+(an?\s+)?(email|message)\s+to\b/i, guidance: '外部サービスへの送信・投稿はツールが行いません。' },
+  // 外部サービスへの送信・投稿。サービス名だけでは判定しない（例: 「Slack トークンをマスキング」は実装依頼）。
+  // サービス名の前後 40 文字以内に送信・投稿・通知を表す語があるときだけ検出する（β版検証で見つけた偽陽性の修正）
+  {
+    code: 'EXTERNAL_POST',
+    re: /\b(slack|twitter|discord|teams|x\.com)\b[^。\n]{0,40}(投稿|送信|通知|送る|送って|post|send|notify|publish|webhook)|(投稿|送信|通知|post|send|notify|publish|webhook)[^。\n]{0,40}\b(slack|twitter|discord|teams|x\.com)\b|メール(で|を)送(信|って)|投稿して|ツイート|\bsend\s+(an?\s+)?(email|message)\s+to\b/i,
+    guidance: '外部サービスへの送信・投稿はツールが行いません。'
+  },
   { code: 'FORCE', re: /--force\b|\bforce\s*push\b|強制(push|プッシュ)/i, guidance: 'force push は禁止です。' },
   { code: 'HISTORY_REWRITE', re: /\brebase\s+-i\b|\bgit\s+rebase\b|\breset\s+--hard\b|\bfilter-branch\b|履歴(を)?(書き換え|改変)/i, guidance: 'Git 履歴の改変はツールが行いません。' }
 ];

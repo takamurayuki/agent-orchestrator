@@ -68,5 +68,37 @@
     "agrees": true,
     "notes": "人間が書いた task.yaml（抑制コメントは「付けてよい」、出力方法は console.log を想定と緩める）を直接承認して Run。Builder はラウンド 1 から process.stdout.write を選び eslint-disable を書かなかったため Policy Gate 0 件、検証 4/4 PASS、Codex approved → COMPLETED（1 ラウンド、137 s、$0.05）。実装・テストとも要件どおり。規約に合わせる余地があると Builder は違反を生まないことの実例。",
     "missed": []
+  },
+  "beta-sample-greet-honorific": {
+    "verdict": "approved",
+    "agrees": true,
+    "notes": "greetFormal は要件どおり（title あり / なし、空白除去、空文字→stranger）。title が空白のみのときを未指定扱いにしたのは要件に明記がない解釈だが妥当。テストは 8 件で境界を網羅。文字列連結で実装。人間の指摘なし。",
+    "missed": []
+  },
+  "beta-batontime-slug": {
+    "verdict": "not_evaluated",
+    "agrees": true,
+    "notes": "ベースライン検証の install が pnpm 12 のサプライチェーンポリシー（ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION: rollup 4.67.3 が公開 24 時間未満）で失敗し PRECHECK_FAILED。AI は呼ばれず料金なし。プロジェクト側の pnpm 設定か時間経過で解消する環境要因。元の理由文に原因が出なかったため、原因診断（minimumReleaseAge / lockfile 不一致 / 通信エラー / タイムアウト）を理由文に追加（β修正）。ヒアリングは 2 ラウンド（blocking 1 問）で承認可能まで到達。",
+    "missed": []
+  },
+  "beta-batontime-ranges": {
+    "verdict": "not_evaluated",
+    "agrees": true,
+    "notes": "beta-batontime-slug と同じ原因で PRECHECK_FAILED（AI 未実行）。ヒアリングは質問なし（1 ラウンド）で承認可能。",
+    "missed": []
+  },
+  "beta-self-slack-token": {
+    "verdict": "not_evaluated",
+    "agrees": false,
+    "notes": "依頼文の「Slack のトークン」を禁止操作検出（EXTERNAL_POST）が外部投稿と誤判定し、要件に禁止操作が含まれるとして承認不可（SUMMARY_READY で停止、GUI から回避不能）。偽陽性。検出をサービス名単独ではなく送信・投稿・通知の語との共起に変更し回帰テストを追加（β修正）。修正後に再実行（beta-self-slack-token-2）。",
+    "missed": [
+      "禁止操作検出の偽陽性（サービス名のみで EXTERNAL_POST）"
+    ]
+  },
+  "beta-self-slack-token-2": {
+    "verdict": "needs_human",
+    "agrees": true,
+    "notes": "偽陽性修正後はヒアリングを通過（質問なしで承認可能）。Run は 3 ラウンドとも Codex が high を出し MAX_ROUNDS。指摘は妥当: コピー元の masking.ts に既に Slack トークンを含む汎用パターンがあり、先に適用されるため、追加したパターンでは「20 文字以上だけマスク（19 文字は非マスク）」という受入条件を満たせない。依頼と既存実装が衝突しており、人間が優先順位（既存パターンの扱い）を決める必要がある。検証は 3 回とも PASS、Policy Gate 0 件、Builder 合計 $0.21、543 秒。",
+    "missed": []
   }
 }

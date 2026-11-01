@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { RunEngine } from '../../src/engine.js';
+import { diagnoseBaselineFailure, RunEngine } from '../../src/engine.js';
 import { evaluateCompletionGate } from '../../src/gate.js';
 import {
   approvedReview,
@@ -38,6 +38,19 @@ describe('RunEngine state machine (SPEC §6)', () => {
     expect(mock.calls.pull).toBe(3);
     const synced = mock.recorder.events.filter((e) => e.type === 'workspace.synced').map((e) => `${e.payload.direction}:${e.payload.after ?? ''}`);
     expect(synced).toEqual(['push:', 'pull:builder', 'pull:verification', 'pull:review'].slice(0, synced.length));
+  });
+
+  it('β: baseline install blocked by pnpm minimumReleaseAge → PRECHECK_FAILED with a plain-language cause (policy is not relaxed)', async () => {
+    const failed = failVerification();
+    failed.commands = [{ ...failed.commands[0]!, name: 'install', exitCode: 1, stderrExcerpt: 'ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION rollup@4.67.3 was published within the minimumReleaseAge cutoff' }];
+    const mock = createMockDeps({ baseline: failed });
+    const status = await runWith(mock);
+    expect(status.state).toBe('PRECHECK_FAILED');
+    expect(status.reasonDetail).toContain('minimumReleaseAge');
+    expect(status.reasonDetail).toContain('AI は実行していません');
+    expect(mock.calls.builder).toBe(0);
+    expect(diagnoseBaselineFailure([{ name: 'lint', exitCode: 1, timedOut: false, stdoutExcerpt: '', stderrExcerpt: '3 problems' }])).toBeNull();
+    expect(diagnoseBaselineFailure([{ name: 'install', exitCode: 1, timedOut: false, stdoutExcerpt: '', stderrExcerpt: 'getaddrinfo ENOTFOUND registry.example.com' }])).toContain('通信エラー');
   });
 
   it('D-23: baseline verification failure (repo broken before any change) → PRECHECK_FAILED without calling the Builder', async () => {

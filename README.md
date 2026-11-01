@@ -54,6 +54,8 @@ tests/       integration（実 Docker）・e2e（実 CLI、RUN_LIVE_E2E=1）・f
 
 インストーラは**未署名**です（署名鍵なし）。SmartScreen の警告が出ます。社内検証用のリリース候補として扱い、一般公開版とは区別してください（`docs/RELEASE.md`）。
 
+β版テスター向けの平易な手順・前提・料金・既知の制限・トラブルシューティングは `docs/BETA_TESTER_GUIDE.md`、問題報告は `docs/ISSUE_TEMPLATE.md` を参照。
+
 ### 初回起動から最初の開発まで（GUI のみ、Node.js / pnpm 不要）
 
 1. インストーラを実行し、アプリを起動する（セットアップチェックが自動で走る）。

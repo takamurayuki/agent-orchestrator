@@ -1,8 +1,8 @@
 # 受入テスト結果
 
-生成: 2026-11-01T10:40:11.682Z
+生成: 2026-11-01T11:15:21.009Z
 
-- Vitest: 208/209 passed
+- Vitest: 209/210 passed
 - Playwright: 26/26 passed
 - 集計: PASS 56 / FAIL 0 / NOT_RUN 0
 
@@ -70,7 +70,7 @@ PASS = 対応する自動テストがすべて成功。FAIL = 1 件以上失敗�
 |---|---|---|---|
 | LIVE-01 | 完全に隔離された小さなサンプルリポジトリで要件入力→ヒアリング→YAML承認→実装→検証→レビュー→結果表示を確認。 | **PASS** | 2026-11-01 tests/e2e/live-pipeline.test.ts（RUN_LIVE_E2E=1、headless）: 専用サンプルリポジトリで依頼→ヒアリング（Claude Code）→承認→実装（Claude Code）→検証（pnpm install/typecheck/lint/test:run 全 exit 0）→レビュー（Codex approved）→ COMPLETED、1 ラウンド、3 分 24 秒。GUI 経由（tauri dev + 実 Runner、Playwright を WebView2 に CDP 接続）でも依頼入力→ヒアリング→同意→承認→Run→結果（COMPLETED）まで 2.5 分で完走。複数ラウンド: CORS オリジン判定シナリオで Claude Code → Codex（high 指摘）→ Claude Code（修正）→ Codex → Claude Code → Codex の 3 ラウンドを実測。各ラウンドで差分が変化し、ハッシュ一致・検証 PASS、上限到達で NEEDS_HUMAN / MAX_ROUNDS（自動承認なし）。 ／ v2.2（2026-11-01）再実行: 同テストを headless で再実行し PASS（COMPLETED、1 ラウンド、157 s、Builder 17.6 s、install/typecheck/lint/test:run すべて exit 0）。 ／ RC（2026-11-01）: 配布ビルドの GUI から要件ヒアリング → 承認 → 実行 → 結果（COMPLETED、2.5 分、Builder $0.11）を再実測 PASS。 |
 | LIVE-02 | 元リポジトリのHEAD/作業ツリー不変、リモートに副作用なし。 | **PASS** | 各 LIVE 実行で元リポジトリの HEAD と作業ツリーが不変、ワークスペースに remote が無いことを assert。egress プロキシのログで allowlist 外（oaiusercontent.com, ab.chatgpt.com, example.com）は 403。 ／ v2.2: 隔離・egress の実 Docker テスト 7 件（CI=1 RUN_DOCKER_TESTS=1）を再実行し PASS。GUI 経由の再実測は未実施（前回結果のまま）。 |
-| LIVE-03 | Windows配布物がNodeの追加インストールなしでUI起動できる。WSL2/Docker/CLIが不足すると明示的に利用不可になる。 | **PASS** | NSIS インストーラ（Agent Orchestrator_0.1.0_x64-setup.exe、24 MB）を tauri build で作成。/S で一時ディレクトリにサイレントインストール → agent-orchestrator-desktop.exe（4.3 MB）+ 同梱サイドカー agent-orchestrator-runner.exe（Node SEA、91 MB）+ uninstall.exe。Node を PATH から外した環境（env -i）で起動し、同梱サイドカーが ready → GUI の environment.check / project.inspect が成功。サンドボックスイメージが無い構成では「✖ 実行不可：セットアップが必要です」と修正方法が表示され開始ボタンが無効。uninstall.exe /S で残存ファイル・レジストリ 0。コード署名は署名鍵が無いため未実施（docs/RELEASE.md に手順）。 ／ v2.2: インストーラは再ビルド・再実測していない（前回結果のまま。サイドカー / Rust に変更なし、cargo check のみ）。 ／ RC（2026-11-01、v2.3 + preflight キャンセル修正）: インストーラを再ビルド（25.2 MB、SHA-256 008BA122…C049）。/S インストール → 最小 PATH（Node / Git / Docker なし）で起動しセットアップ案内を表示 → Node 非搭載 PATH で GUI 全フロー COMPLETED → 停止 → 再起動後に履歴復元 → uninstall /S で残存 0。詳細は docs/RC_VERIFICATION.md。 ／ v0.1.0 公開準備（2026-11-01）: 配布ビルド（SHA-256 D2DF25C5…953E）を、ローカルイメージ全削除・空 app-data・Node/pnpm なし PATH で起動。GUI の「サンドボックスを準備する」（同意→取得→ダイジェスト検証→ビルド→ラベル検証）39 秒で実行可能に → GUI 全フロー COMPLETED（3.1 分）→ uninstall /S で残存 0、Docker コンテナ/ボリューム/ネットワーク 0。 |
+| LIVE-03 | Windows配布物がNodeの追加インストールなしでUI起動できる。WSL2/Docker/CLIが不足すると明示的に利用不可になる。 | **PASS** | NSIS インストーラ（Agent Orchestrator_0.1.0_x64-setup.exe、24 MB）を tauri build で作成。/S で一時ディレクトリにサイレントインストール → agent-orchestrator-desktop.exe（4.3 MB）+ 同梱サイドカー agent-orchestrator-runner.exe（Node SEA、91 MB）+ uninstall.exe。Node を PATH から外した環境（env -i）で起動し、同梱サイドカーが ready → GUI の environment.check / project.inspect が成功。サンドボックスイメージが無い構成では「✖ 実行不可：セットアップが必要です」と修正方法が表示され開始ボタンが無効。uninstall.exe /S で残存ファイル・レジストリ 0。コード署名は署名鍵が無いため未実施（docs/RELEASE.md に手順）。 ／ v2.2: インストーラは再ビルド・再実測していない（前回結果のまま。サイドカー / Rust に変更なし、cargo check のみ）。 ／ RC（2026-11-01、v2.3 + preflight キャンセル修正）: インストーラを再ビルド（25.2 MB、SHA-256 008BA122…C049）。/S インストール → 最小 PATH（Node / Git / Docker なし）で起動しセットアップ案内を表示 → Node 非搭載 PATH で GUI 全フロー COMPLETED → 停止 → 再起動後に履歴復元 → uninstall /S で残存 0。詳細は docs/RC_VERIFICATION.md。 ／ v0.1.0 公開準備（2026-11-01）: 配布ビルド（SHA-256 D2DF25C5…953E）を、ローカルイメージ全削除・空 app-data・Node/pnpm なし PATH で起動。GUI の「サンドボックスを準備する」（同意→取得→ダイジェスト検証→ビルド→ラベル検証）39 秒で実行可能に → GUI 全フロー COMPLETED（3.1 分）→ uninstall /S で残存 0、Docker コンテナ/ボリューム/ネットワーク 0。 ／ β検証（2026-11-01）: 最終ビルド（SHA-256 55B4E4DC…C52A）を Node/pnpm なし PATH・空 app-data で起動し GUI 全フロー COMPLETED（2.3 分）、uninstall /S で残存 0。キャッシュ無し構築 289 秒。別 PC / VM は未検証。 |
 
 ## 対応テスト詳細
 
