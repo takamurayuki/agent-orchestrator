@@ -141,6 +141,21 @@ describe('RunEngine state machine (SPEC §6)', () => {
     expect(mock.reviewerInputs[0]?.diff.summary.files[0]?.status).toBe('untracked');
   });
 
+  it('RC: cancellation during preflight (isolation probe aborted) → INTERRUPTED / CANCELLED, not PRECHECK_FAILED', async () => {
+    const controller = new AbortController();
+    const mock = createMockDeps();
+    mock.deps.preflight = async ({ signal }) => {
+      controller.abort();
+      expect(signal.aborted).toBe(true);
+      // 実機の preflight は中断されたプローブを fail として返す
+      return { ok: false, checks: [{ id: 'docker.isolation', label: 'Docker 隔離の実測', status: 'fail', detail: 'キャンセルされました', fix: null }] };
+    };
+    const status = await runWith(mock, snapshot(), controller);
+    expect(status.state).toBe('INTERRUPTED');
+    expect(status.reasonCode).toBe('CANCELLED');
+    expect(mock.calls.builder).toBe(0);
+  });
+
   it('EX-12: cancellation during builder → INTERRUPTED', async () => {
     const controller = new AbortController();
     const mock = createMockDeps({

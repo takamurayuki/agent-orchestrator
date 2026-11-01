@@ -2,6 +2,14 @@
 
 作成日: 2026-11-01（リリース準備フェーズ後に更新）　対象: `docs/SPEC.md` v2.0　受入結果: `docs/ACCEPTANCE_REPORT.md`（**PASS 56 / FAIL 0 / NOT_RUN 0**）
 
+## 0⁵. リリース候補（RC）検証の結果（2026-11-01 追記）
+
+詳細は `docs/RC_VERIFICATION.md`。v2.3（`be0595d`）を未署名 RC として固定し、NSIS インストーラを再ビルド → サイレントインストール → 最小 PATH（Node / Git / Docker なし）での起動と初回環境チェック → Node 非搭載 PATH での GUI 全フロー（COMPLETED、2.5 分）→ 無効フォルダーのエラー表示 → 停止 → 再起動後の履歴復元 → アンインストール（残存 0）を実測した。
+
+- **見つけた不具合（修正済み）:** 起動前検査（Docker 隔離プローブ）中に停止すると `PRECHECK_FAILED` として記録され「環境を直して」と案内されていた。エンジンで preflight 後にキャンセルを評価し `INTERRUPTED / CANCELLED` にする（回帰テスト追加）。再ビルドした配布物で GUI から再確認。
+- **配布上の制限:** 未署名（一般公開版と区別）、サンドボックスイメージは配布物に含まれない（`pnpm sandbox:build` が必要）、クリーンな別 PC / VM での検証は未実施。README「既知の制限」と `docs/RELEASE.md` §5 に明記。
+- 自動テスト（順次実行）: Vitest 201 passed / 1 skipped（LIVE 用ファイル）、Playwright 22 passed、svelte-check / tsc / cargo check / eslint クリーン。
+
 ## 0⁗. v2.3 UX 改善・操作性強化の結果（2026-11-01 追記）
 
 ### 変更した画面

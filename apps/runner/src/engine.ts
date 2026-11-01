@@ -265,6 +265,8 @@ export class RunEngine {
       const preflight = await this.deps.preflight({ task, signal });
       for (const c of preflight.checks) await emit('preflight.check', { ...c });
       await emit('preflight.completed', { ok: preflight.ok, failed: preflight.checks.filter((c) => c.status === 'fail').map((c) => c.id) });
+      // 起動前検査中のキャンセルは「検査失敗」ではなく INTERRUPTED / CANCELLED として記録する（RC 検証で発見、v2.3.1）
+      checkCancelled();
       if (!preflight.ok) {
         const failed = preflight.checks.filter((c) => c.status === 'fail' || c.status === 'unverified');
         return await finish('PRECHECK_FAILED', 'PRECHECK_FAILED', failed.map((c) => `${c.id}: ${c.detail}`).join('; '));

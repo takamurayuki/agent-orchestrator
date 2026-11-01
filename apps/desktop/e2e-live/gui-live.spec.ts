@@ -102,10 +102,18 @@ test.describe('LIVE GUI (Tauri + real runner)', () => {
     await page.getByTestId('approve').click();
 
     await expect(page.getByTestId('screen-running')).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByTestId('current-activity')).toContainText(/現在の処理|結果/);
+    // v2.3: Run ID と task.yaml は「技術情報」の折りたたみ内
+    await page.getByTestId('run-technical').locator('summary').first().click();
     await expect(page.getByTestId('run-id')).not.toBeEmpty();
     await expect(page.getByTestId('fixed-yaml')).toContainText('schemaVersion: 2');
     // 実行完了（最大 45 分）→ 結果画面
     await expect(page.getByTestId('screen-result')).toBeVisible({ timeout: 45 * 60 * 1000 });
+    const headline = await page.getByTestId('outcome-headline').innerText();
+    console.log(`[live-gui] result headline: ${headline}`);
+    expect(headline).toMatch(/開発が完了しました|人の判断が必要です/);
+    // v2.3: 内部ステータスと技術情報は折りたたみ内
+    await page.getByTestId('result-internal').locator('summary').first().click();
     const stateText = await page.getByTestId('result-status-text').innerText();
     console.log(`[live-gui] result: ${stateText}`);
     expect(stateText).toMatch(/COMPLETED|NEEDS_HUMAN/);

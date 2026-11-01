@@ -41,6 +41,19 @@ tests/       integration（実 Docker）・e2e（実 CLI、RUN_LIVE_E2E=1）・f
 
 ホストに `claude` / `codex` がインストールされている必要はありません（実行はサンドボックスイメージ内のピン留め版）。ただしホスト版がある場合はフラグ互換を `environment.check` で照合します。
 
+### 配布版（NSIS インストーラ）を使う場合の前提条件
+
+| 要件 | 備考 |
+|---|---|
+| Windows 11 x64 | WebView2 ランタイム同梱（Windows 11 標準）。他 OS 向けの配布物はありません |
+| Docker Desktop（WSL2 バックエンド）が起動していること | Docker が無い / 起動していない場合はアプリの「セットアップチェック」に「失敗」と修正方法が表示され、開始できません |
+| Git | PATH にあること。無いとセットアップチェックで失敗と表示されます |
+| サンドボックスイメージ 2 つ（`agent-orchestrator/sandbox:node22`、`agent-orchestrator/egress-proxy`） | **配布物には含まれません。** このリポジトリで `pnpm sandbox:build` を実行してローカルにビルドしてください（Docker Hub 等への公開は未実施） |
+| Claude Code / Codex の認証ファイル | ホストで一度ログインしておく（`claude` / `codex login`）。アプリは認証を代行しません |
+| Node.js | **不要**（サイドカーに同梱） |
+
+インストーラは**未署名**です（署名鍵なし）。SmartScreen の警告が出ます。社内検証用のリリース候補として扱い、一般公開版とは区別してください（`docs/RELEASE.md`）。
+
 ## セットアップ
 
 ```bash
@@ -158,7 +171,11 @@ node scripts/live-policy-loop.mjs --name <id> --repo <path> --task tests/fixture
 
 ## 既知の制限・未検証事項
 
-- コード署名は未実施（署名鍵なし）。NSIS インストーラの作成・サイレントインストール・起動・アンインストールは実測済み。
+- コード署名は未実施（署名鍵なし）。NSIS インストーラの作成・サイレントインストール・起動・アンインストールは実測済み（`docs/RC_VERIFICATION.md`）。未署名のため、リリース候補（RC）として社内配布に限定する。
+- サンドボックスイメージは配布物に含まれず、利用者がリポジトリから `pnpm sandbox:build` でビルドする必要がある（Docker Hub 等での公開は未実施）。
+- クリーンな Windows 環境（別 PC / VM）での検証は未実施。同一 PC 上で PATH を最小化（Node / Git / Docker なし）した起動と、Node 非搭載 PATH での全フローを実測した。
+- 元プロジェクトへの反映（コミット・push）機能は無い。作業用コピーのパスを示すだけで、取り込みは利用者が Git ツールで行う。
+- 外部テスターによる操作性評価は未実施。
 - WSL2 ディストリビューション内で runner を動かす構成は未実測（Docker Desktop の WSL 連携が必要）。
 - egress プロキシは TLS を終端しないため、許可ホストへの通信内容は検査しない。
 - `pnpm install --ignore-scripts` のため postinstall が必要な依存を持つプロジェクトでは検証が失敗し得る（`NEEDS_HUMAN`）。
