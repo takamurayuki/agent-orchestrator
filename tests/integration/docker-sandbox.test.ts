@@ -42,13 +42,16 @@ d('Docker sandbox (live docker)', () => {
     execFileSync('git', ['init', '-q'], { cwd: host });
     await sandbox.pushWorkspace(runId, host);
     // コンテナ内で変更: 追加・削除・node_modules 作成
-    const r = await sandbox.exec(runId, { ...noAccess, name: 'mutate', argv: ['sh', '-c', 'ls -la /workspace && rm /workspace/src/a.txt && echo new > /workspace/src/b.txt && mkdir -p /workspace/node_modules/x && echo m > /workspace/node_modules/x/i.js && test -d /workspace/.git && echo gitok'], workspace: 'rw', timeoutMs: 60_000 });
+    // ネストした workspace パッケージの node_modules（pnpm は .pnpm への symlink を作る）も除外されること（ドッグフーディング batontime/functions で実測した回帰）
+    const r = await sandbox.exec(runId, { ...noAccess, name: 'mutate', argv: ['sh', '-c', 'ls -la /workspace && rm /workspace/src/a.txt && echo new > /workspace/src/b.txt && mkdir -p /workspace/node_modules/x && echo m > /workspace/node_modules/x/i.js && mkdir -p /workspace/functions/node_modules/.pnpm/pkg && ln -s ../../../node_modules/.pnpm/pkg /workspace/functions/node_modules/pkg && echo f > /workspace/functions/index.js && test -d /workspace/.git && echo gitok'], workspace: 'rw', timeoutMs: 60_000 });
     expect(r.stdout).toContain('gitok');
     await sandbox.pullWorkspace(runId, host);
     expect(existsSync(join(host, 'src', 'a.txt'))).toBe(false);
     expect(readFileSync(join(host, 'src', 'b.txt'), 'utf8').trim()).toBe('new');
     expect(readFileSync(join(host, 'keep.txt'), 'utf8')).toBe('keep');
     expect(existsSync(join(host, 'node_modules'))).toBe(false);
+    expect(existsSync(join(host, 'functions', 'node_modules'))).toBe(false);
+    expect(readFileSync(join(host, 'functions', 'index.js'), 'utf8').trim()).toBe('f');
     expect(existsSync(join(host, '.git'))).toBe(true);
     rmSync(host, { recursive: true, force: true });
   }, 300_000);

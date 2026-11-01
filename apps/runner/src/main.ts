@@ -79,8 +79,8 @@ export function createRuntime(env: NodeJS.ProcessEnv = process.env) {
         push: (runId, ws) => sandbox.pushWorkspace(runId, ws.path),
         pull: (runId, ws) => sandbox.pullWorkspace(runId, ws.path)
       },
-      builder: new ClaudeBuilder(sandbox, claudeCreds),
-      verifier: new SandboxVerifier(sandbox),
+      builder: new ClaudeBuilder(sandbox, claudeCreds, 10, config.sandboxEnv),
+      verifier: new SandboxVerifier(sandbox, config.sandboxEnv),
       reviewer: new CodexReviewer(sandbox, codexCreds)
     },
     onRunUpdated: (s) => listeners.run.forEach((l) => l(s)),

@@ -107,7 +107,7 @@ export class WorkspaceManager {
     // コンテナ内に生成される依存・ストアを git からも見えなくする（Reviewer が untracked として報告しないように。LIVE GUI で実測）
     const excludeFile = join(path, '.git', 'info', 'exclude');
     mkdirSync(join(path, '.git', 'info'), { recursive: true });
-    appendFileSync(excludeFile, `\n# agent-orchestrator\n${this.excludes.map((e) => `/${e}/`).join('\n')}\n`, 'utf8');
+    appendFileSync(excludeFile, `\n# agent-orchestrator\n${this.excludes.map((e) => `${e}/`).join('\n')}\n`, 'utf8');
     return { path, baseSha: input.baseSha };
   }
 

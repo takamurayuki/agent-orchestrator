@@ -65,6 +65,13 @@ describe('SandboxVerifier', () => {
     expect(sandbox.steps[0]?.env.COREPACK_ENABLE_STRICT).toBe('0');
   });
 
+  it('D-26: operator-provided sandbox env (e.g. pnpm minimum release age) is passed to verification steps, never overriding fixed keys', async () => {
+    const sandbox = new FakeSandbox();
+    await new SandboxVerifier(sandbox, { pnpm_config_minimum_release_age: '0', CI: 'hacked' }).verify(input(sandbox));
+    expect(sandbox.steps[0]?.env.pnpm_config_minimum_release_age).toBe('0');
+    expect(sandbox.steps[0]?.env.CI).toBe('1');
+  });
+
   it('stops at the first failure and records remaining as missing', async () => {
     const sandbox = new FakeSandbox((step) => (step.argv.includes('typecheck') ? { exitCode: 2, stderr: 'TS2322' } : {}));
     const result = await new SandboxVerifier(sandbox).verify(input(sandbox));

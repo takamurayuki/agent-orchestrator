@@ -145,6 +145,12 @@ SPEC.md を唯一の要件ベースラインとし、契約の曖昧さ・不整
 - **理由:** Git for Windows は `core.autocrlf=true` をシステム設定に持つ。システム設定を無視して `git status` を実行すると、CRLF でチェックアウトされた作業ツリーの全ファイルが「変更あり」に見え、preflight の「Git clean」が誤って失敗する（ドッグフーディング temporaid で実測。利用者側の `git status` はクリーン）。
 - **影響・対処:** 利用者に見えている状態と一致する。回帰テスト `workspace.test.ts`（`GIT_CONFIG_SYSTEM` で autocrlf=true を与えても clean）。
 
+## D-26 運用者設定でサンドボックスの install ポリシーを調整できる（既定は変更しない）
+
+- **決定:** `AGENT_ORCHESTRATOR_PNPM_MIN_RELEASE_AGE=<分>` が設定されたときだけ、検証 / Builder コンテナに `pnpm_config_minimum_release_age` を渡す（数字以外は無視。固定キー CI 等は上書き不可）。egress allowlist（`AGENT_ORCHESTRATOR_EGRESS_ALLOWLIST`）とメモリ上限（`AGENT_ORCHESTRATOR_MEMORY`）も従来どおり運用者設定。
+- **理由:** ドッグフーディングで、(a) pnpm 12 の supply-chain policy（公開から一定時間未満のパッケージを拒否）により、ホストでは承認済みの lockfile がサンドボックス内（承認キャッシュ無し）で `ERR_PNPM_LOCKFILE_...` 相当で拒否される（batontime）、(b) `prisma generate` が `binaries.prisma.sh` からエンジンを取得する（temporaid）、(c) 並列 typecheck がメモリ上限 4g で SIGKILL される（temporaid apps/web）ケースを確認した。いずれも AI ではなくプロジェクト/環境側の要件で、既定を緩めるのではなく運用者が明示的に設定して初めて有効になる。
+- **影響・対処:** 設定値はイベント・レポートには出さない（秘密ではないが、環境依存）。README に設定方法を記載。回帰テスト `verification.test.ts`。
+
 ## 残課題（未実装 / 未実測）
 
 - コード署名（署名鍵が無いため未実施。NSIS インストーラは作成・実測済み）。

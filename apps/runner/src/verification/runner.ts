@@ -9,7 +9,11 @@ import { expectedCommandNames, getProfile } from './profiles.js';
  * 1 つでも失敗したら以降はスキップし（欠落として記録）、passed=false。
  */
 export class SandboxVerifier {
-  constructor(private readonly sandbox: SandboxExecutor) {}
+  constructor(
+    private readonly sandbox: SandboxExecutor,
+    /** 運用者設定の追加環境変数（config.sandboxEnv） */
+    private readonly extraEnv: Record<string, string> = {}
+  ) {}
 
   expectedCommands(profile: VerifierInput['profile']): string[] {
     return expectedCommandNames(profile);
@@ -35,7 +39,7 @@ export class SandboxVerifier {
         aux: 'none',
         workdir: CONTAINER_WORKSPACE,
         // pnpm store はワークスペースボリューム内（tmpfs の /tmp に大量書込しない。同期からは除外される）
-        env: { CI: '1', FORCE_COLOR: '0', NODE_OPTIONS: '--max-old-space-size=2048', pnpm_config_store_dir: '/workspace/.pnpm-store', pnpm_config_cache_dir: '/workspace/.pnpm-store/cache', pnpm_config_manage_package_manager_versions: 'false', COREPACK_ENABLE_STRICT: '0', COREPACK_ENABLE_AUTO_PIN: '0' },
+        env: { ...this.extraEnv, CI: '1', FORCE_COLOR: '0', NODE_OPTIONS: '--max-old-space-size=2048', pnpm_config_store_dir: '/workspace/.pnpm-store', pnpm_config_cache_dir: '/workspace/.pnpm-store/cache', pnpm_config_manage_package_manager_versions: 'false', COREPACK_ENABLE_STRICT: '0', COREPACK_ENABLE_AUTO_PIN: '0' },
         network: cmd.network,
         timeoutMs: perCommandTimeout,
         signal: input.signal,

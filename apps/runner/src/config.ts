@@ -23,6 +23,13 @@ export interface RunnerConfig {
   inspect: { maxFiles: number; maxFileBytes: number; maxTotalBytes: number; timeoutMs: number };
   /** 実 CLI を使う E2E を許可するか（RUN_LIVE_E2E=1） */
   liveE2E: boolean;
+  /**
+   * 検証 / Builder コンテナに追加する環境変数（運用者設定。allowlist されたキーのみ）。
+   * 例: AGENT_ORCHESTRATOR_PNPM_MIN_RELEASE_AGE=0 → pnpm_config_minimum_release_age=0
+   *（pnpm 12 の supply-chain policy「公開から一定時間未満のパッケージを拒否」をプロジェクト側で既に受け入れている場合に、
+   *   サンドボックス内の install が同じ lockfile で失敗しないようにする。D-26）
+   */
+  sandboxEnv: Record<string, string>;
 }
 
 export const DEFAULT_EGRESS_ALLOWLIST = [
@@ -49,7 +56,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): RunnerConfig {
     maxLogBytes: 2 * 1024 * 1024,
     maxDiffBytes: 4 * 1024 * 1024,
     inspect: { maxFiles: 4000, maxFileBytes: 256 * 1024, maxTotalBytes: 24 * 1024 * 1024, timeoutMs: 20_000 },
-    liveE2E: env.RUN_LIVE_E2E === '1'
+    liveE2E: env.RUN_LIVE_E2E === '1',
+    sandboxEnv: {
+      ...(env.AGENT_ORCHESTRATOR_PNPM_MIN_RELEASE_AGE !== undefined && /^\d+$/.test(env.AGENT_ORCHESTRATOR_PNPM_MIN_RELEASE_AGE) ? { pnpm_config_minimum_release_age: env.AGENT_ORCHESTRATOR_PNPM_MIN_RELEASE_AGE } : {})
+    }
   };
 }
 

@@ -60,6 +60,18 @@ pnpm --filter @agent-orchestrator/desktop run tauri:dev
 
 Rust 側が `node apps/runner/dist/main.js --ipc stdio` をサイドカーとして起動します（`AGENT_ORCHESTRATOR_RUNNER_CMD` / `AGENT_ORCHESTRATOR_RUNNER_ARGS` で変更可）。ブラウザのみで UI を確認する場合は `pnpm --filter @agent-orchestrator/desktop run dev`（モックトランスポート）。
 
+## 運用者設定（環境変数）
+
+| 変数 | 既定 | 用途 |
+|---|---|---|
+| `AGENT_ORCHESTRATOR_APP_DATA` | `~/.agent-orchestrator/app-data` | SQLite・tasks・runs・ワークスペースの保存先 |
+| `AGENT_ORCHESTRATOR_EGRESS_ALLOWLIST` | `api.anthropic.com,api.openai.com,chatgpt.com,auth.openai.com,registry.npmjs.org` | コンテナから到達できるホスト。例: Prisma を使うプロジェクトでは `binaries.prisma.sh` を追加 |
+| `AGENT_ORCHESTRATOR_MEMORY` / `_CPUS` / `_PIDS` | `4g` / `2` / `512` | ステップコンテナの資源上限。モノレポの並列 typecheck が SIGKILL される場合はメモリを増やす |
+| `AGENT_ORCHESTRATOR_PNPM_MIN_RELEASE_AGE` | （未設定 = pnpm 既定） | pnpm 12 の supply-chain policy（公開からの最小経過時間）。ホストで承認済みの lockfile がサンドボックスで拒否される場合に `0` 等を設定（D-26） |
+| `AGENT_ORCHESTRATOR_SANDBOX_IMAGE` / `_EGRESS_IMAGE` | `agent-orchestrator-sandbox:0.1.0` / `agent-orchestrator-egress-proxy:0.1.0` | ピン留めイメージ |
+
+Run の起動前には、変更前のリポジトリに対して検証プロファイルを一度実行する「ベースライン検証」を行い、通らなければ AI を呼ばずに `PRECHECK_FAILED` で止まります（D-23）。上の設定はこのベースラインを通すために使います。
+
 ## 使い方（4 画面）
 
 1. **Home / Create**: プロジェクトフォルダーを選択（Git・ベースブランチ・検証プロファイルの可否を read-only で確認）、依頼を自然言語で入力。

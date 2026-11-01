@@ -219,7 +219,7 @@ export class DockerSandbox implements SandboxExecutor {
     // 既存内容を消してから展開（ミラー）
     await this.dockerOk(['run', '--rm', '--network', 'none', '--user', CONTAINER_USER, '--mount', `type=volume,source=${names.workspace},target=${CONTAINER_WORKSPACE}`, this.options.config.sandboxImage, 'sh', '-c', 'find /workspace -mindepth 1 -maxdepth 1 -exec rm -rf {} +'], 'ワークスペースボリュームを初期化できない', 120_000);
     // ホスト側パス（C:\...）を argv に出さない: GNU tar はコロンをリモートホスト指定と解釈する。cwd で指定する
-    const tarArgs = ['-cf', '-', ...SYNC_EXCLUDES.flatMap((e) => ['--exclude', `./${e}`]), '.'];
+    const tarArgs = ['-cf', '-', ...SYNC_EXCLUDES.flatMap((e) => ['--exclude', e]), '.'];
     const dockerArgs = ['run', '--rm', '-i', '--name', containerName, '--network', 'none', '--user', CONTAINER_USER, '--mount', `type=volume,source=${names.workspace},target=${CONTAINER_WORKSPACE}`, this.options.config.sandboxImage, 'tar', '-xf', '-', '--no-same-owner', '--no-same-permissions', '-C', CONTAINER_WORKSPACE];
     await pipeProcesses({ command: this.tar, args: tarArgs, cwd: hostDir }, { command: 'docker', args: dockerArgs }, 600_000);
   }
@@ -231,7 +231,7 @@ export class DockerSandbox implements SandboxExecutor {
     const containerName = names.step(`pull-${Date.now().toString(36)}`);
     const staging = mkdtempSync(join(tmpdir(), 'ao-pull-'));
     try {
-      const dockerArgs = ['run', '--rm', '--name', containerName, '--network', 'none', '--user', CONTAINER_USER, '--mount', `type=volume,source=${names.workspace},target=${CONTAINER_WORKSPACE},readonly`, this.options.config.sandboxImage, 'tar', '-cf', '-', ...SYNC_EXCLUDES.flatMap((e) => ['--exclude', `./${e}`]), '-C', CONTAINER_WORKSPACE, '.'];
+      const dockerArgs = ['run', '--rm', '--name', containerName, '--network', 'none', '--user', CONTAINER_USER, '--mount', `type=volume,source=${names.workspace},target=${CONTAINER_WORKSPACE},readonly`, this.options.config.sandboxImage, 'tar', '-cf', '-', ...SYNC_EXCLUDES.flatMap((e) => ['--exclude', e]), '-C', CONTAINER_WORKSPACE, '.'];
       await pipeProcesses({ command: 'docker', args: dockerArgs }, { command: this.tar, args: ['-xf', '-'], cwd: staging }, 600_000);
       // 置き換え: ホスト側を空にして移動
       mkdirSync(hostDir, { recursive: true });
