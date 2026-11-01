@@ -82,6 +82,20 @@ export const PolicyViolationSchema = z.strictObject({
 });
 export type PolicyViolation = z.infer<typeof PolicyViolationSchema>;
 
+/** Policy Gate（v2.1）の検出結果。AI レビューとは独立した静的チェック。approved はベースコミットの人間管理の例外に一致した場合のみ true */
+export const POLICY_RULE_IDS = ['PG-ESLINT-DISABLE', 'PG-TS-SUPPRESS', 'PG-TEST-SKIP', 'PG-TEST-DELETED', 'PG-VERIFY-SCRIPT', 'PG-TSCONFIG-RELAXED', 'PG-ESLINT-RELAXED', 'PG-TESTCONFIG-RELAXED'] as const;
+export const PolicyFindingSchema = z.strictObject({
+  ruleId: z.enum(POLICY_RULE_IDS),
+  severity: z.enum(['blocking', 'warning']),
+  file: z.string(),
+  line: z.number().int().min(1),
+  evidence: z.string(),
+  message: z.string(),
+  approved: z.boolean(),
+  approvalReason: z.string().nullable()
+});
+export type PolicyFinding = z.infer<typeof PolicyFindingSchema>;
+
 export const DiffFileSchema = z.strictObject({
   path: z.string(),
   status: z.enum(['added', 'modified', 'deleted', 'renamed', 'untracked']),
@@ -126,6 +140,8 @@ export const RoundRecordSchema = z.strictObject({
   builder: BuilderOutcomeSchema.nullable(),
   diff: DiffSummarySchema.nullable(),
   policyViolations: z.array(PolicyViolationSchema),
+  /** Policy Gate の検出（v2.1）。古い記録では省略 */
+  policyFindings: z.array(PolicyFindingSchema).default([]),
   verification: VerificationResultSchema.nullable(),
   review: ReviewOutcomeSchema.nullable(),
   workspaceHashBeforeReview: z.string().nullable(),

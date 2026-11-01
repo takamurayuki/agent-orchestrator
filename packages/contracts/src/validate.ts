@@ -4,6 +4,7 @@ import { validateAgainstJsonSchema, type SchemaName } from './json-schema.js';
 import { ReviewSchema, type Review } from './review.js';
 import { TaskProposalSchema, type TaskProposal } from './task-proposal.js';
 import { TaskSchema, type Task } from './task.js';
+import { ContradictionReportSchema, type ContradictionReport } from './contradiction.js';
 
 export type ValidationResult<T> = { ok: true; value: T } | { ok: false; errors: string[] };
 
@@ -29,6 +30,9 @@ export function validateInterview(value: unknown): ValidationResult<Interview> {
 }
 export function validateTaskProposal(value: unknown): ValidationResult<TaskProposal> {
   return validateBoth('taskProposal', TaskProposalSchema, value);
+}
+export function validateContradictions(value: unknown): ValidationResult<ContradictionReport> {
+  return validateBoth('contradiction', ContradictionReportSchema, value);
 }
 
 /**

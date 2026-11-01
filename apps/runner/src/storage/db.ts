@@ -140,6 +140,21 @@ const MIGRATIONS: Array<{ version: number; sql: string }> = [
       CREATE INDEX IF NOT EXISTS idx_runs_started ON runs(started_at DESC);
       CREATE INDEX IF NOT EXISTS idx_drafts_project ON drafts(project_id);
     `
+  },
+  {
+    version: 2,
+    sql: `
+      ALTER TABLE drafts ADD COLUMN contradictions_json TEXT NOT NULL DEFAULT '[]';
+      CREATE TABLE IF NOT EXISTS decisions (
+        id TEXT PRIMARY KEY,
+        draft_id TEXT NOT NULL REFERENCES drafts(id),
+        contradiction_id TEXT NOT NULL,
+        decision_json TEXT NOT NULL,
+        decision_version INTEGER NOT NULL DEFAULT 1,
+        decided_at TEXT NOT NULL,
+        UNIQUE(draft_id, contradiction_id)
+      );
+    `
   }
 ];
 

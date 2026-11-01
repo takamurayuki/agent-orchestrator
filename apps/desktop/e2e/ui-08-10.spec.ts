@@ -65,6 +65,14 @@ test.describe('UI-09 実行キャンセル', () => {
     await expect(page.getByTestId('log-panel')).toContainText('run.cancel_requested');
     const sequences = await rows.locator('td:first-child').allTextContents();
     expect(sequences.map(Number)).toEqual([...sequences.map(Number)].sort((a, b) => a - b));
+
+    // v2.1 Policy Gate: 未完了 Run では静的チェックの検出がファイル・行・ルール ID・証拠付きで表示される
+    await page.getByTestId('nav-result').click();
+    const policy = page.getByTestId('policy-findings');
+    await expect(policy).toContainText('PG-ESLINT-DISABLE');
+    await expect(policy).toContainText('src/auth/login.ts:12');
+    await expect(policy).toContainText('eslint-disable-next-line');
+    await expect(policy).toContainText('未承認');
   });
 });
 

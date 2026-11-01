@@ -2,6 +2,7 @@ import {
   isTerminalRunState,
   type BuilderOutcome,
   type DiffSummary,
+  type PolicyFinding,
   type PolicyViolation,
   type ResolvedTask,
   type ReviewFinding,
@@ -15,6 +16,7 @@ import {
 } from '@agent-orchestrator/contracts';
 import { evaluateCompletionGate, type GateResult } from './gate.js';
 import { checkDiffPolicy } from './policy.js';
+import { evaluatePolicyGate, parsePolicyExceptions, renderPolicyFeedback } from './policy-gate.js';
 
 /**
  * 実行状態機械（SPEC §6）。外部副作用はすべて EngineDeps 経由で注入し、単体テストではモックする。
@@ -79,6 +81,8 @@ export interface BuilderFeedback {
   reviewFindings: ReviewFinding[];
   requirementsUnverified: string[];
   reviewSummary: string | null;
+  /** Policy Gate の未承認 blocking 検出（v2.1）。ルールを無効化せずコードを直すよう Builder に返す */
+  policyFindings: string[];
 }
 
 export interface VerifierInput {
@@ -111,6 +115,10 @@ export interface EngineDeps {
     create(input: { runId: string; repository: string; baseSha: string }): Promise<WorkspaceHandle>;
     captureDiff(workspace: WorkspaceHandle): Promise<DiffCapture>;
     hash(workspace: WorkspaceHandle): Promise<string>;
+    /** ベースコミット時点のファイル内容（Policy Gate の比較・人間管理の例外ファイル用） */
+    readBaseFile(workspace: WorkspaceHandle, relPath: string): Promise<string | null>;
+    /** 作業ツリーのファイル内容 */
+    readWorkspaceFile(workspace: WorkspaceHandle, relPath: string): string | null;
   };
   builder: { implement(input: BuilderInput): Promise<BuilderOutcome> };
   verifier: {
@@ -165,7 +173,7 @@ export const NEXT_ACTIONS: Record<RunReasonCode, string[]> = {
   BUILDER_FAILED: ['Builder（Claude Code）が異常終了しました。rounds/<n>/builder.log を確認し、認証・通信・権限を確認してください'],
   BUILDER_TIMEOUT: ['Builder がタイムアウトしました。cliTimeoutSeconds の見直し、またはタスクの分割を検討してください'],
   NO_CHANGES: ['Builder が変更を生成しませんでした。要件が既に満たされているか、依頼内容が不明確な可能性があります'],
-  POLICY_VIOLATION: ['差分にポリシー違反（テスト削除・skip、検証設定の弱体化、禁止パス）があります。差分を確認し、手動で修正してください'],
+  POLICY_VIOLATION: ['差分にポリシー違反（eslint-disable / ts-ignore の追加、テストの skip・削除、検証設定の緩和、禁止パス）があります。rounds/<n>/policy.json を確認し、手動で修正するか、意図的な例外ならベースコミットの .agent-orchestrator/policy.json に理由付きで登録して再実行してください'],
   WORKSPACE_MODIFIED_DURING_REVIEW: ['レビュー中に worktree が変更されました。Reviewer の read-only 隔離を確認してください'],
   TIMEOUT: ['maxDurationSeconds を超過しました。途中成果は worktree に残っています'],
   GATE_FAILED: ['完了ゲートを満たしていません。レポートのゲート失敗一覧を確認してください'],
@@ -307,6 +315,7 @@ export class RunEngine {
           builder: null,
           diff: null,
           policyViolations: [],
+          policyFindings: [],
           verification: null,
           review: null,
           workspaceHashBeforeReview: null,
@@ -360,6 +369,7 @@ export class RunEngine {
           await this.deps.recorder.saveRound(runId, record);
           return await finish('NEEDS_HUMAN', 'NO_CHANGES', `round ${round}: Builder が変更を生成しなかった`);
         }
+        // セキュリティ系（worktree 外・禁止パス）は即停止
         const violations: PolicyViolation[] = checkDiffPolicy({ files: diff.summary.files, patches: diff.patches });
         record.policyViolations = violations;
         await emit('policy.checked', { round, violations: violations.length, codes: violations.map((v) => v.code) }, round);
@@ -367,6 +377,29 @@ export class RunEngine {
           record.finishedAt = new Date(this.deps.now()).toISOString();
           await this.deps.recorder.saveRound(runId, record);
           return await finish('NEEDS_HUMAN', 'POLICY_VIOLATION', violations.map((v) => `${v.code} ${v.file}`).join('; '));
+        }
+
+        // Policy Gate（v2.1）: AI レビューと独立した静的チェック。未承認 blocking は Builder に返して修正させる（残試行があれば）
+        const baseContents: Record<string, string | null> = {};
+        const currentContents: Record<string, string | null> = {};
+        for (const f of diff.summary.files) {
+          baseContents[f.path] = f.status === 'added' || f.status === 'untracked' ? null : await this.deps.workspace.readBaseFile(workspace, f.path);
+          currentContents[f.path] = f.status === 'deleted' ? null : this.deps.workspace.readWorkspaceFile(workspace, f.path);
+        }
+        const exceptions = parsePolicyExceptions(await this.deps.workspace.readBaseFile(workspace, '.agent-orchestrator/policy.json'));
+        const gateResult = evaluatePolicyGate({ files: diff.summary.files, baseContents, currentContents, exceptions, requiredScripts: this.deps.verifier.expectedCommands(task.verificationProfile).filter((c) => c !== 'install') });
+        record.policyFindings = gateResult.findings;
+        await this.deps.recorder.saveArtifact(runId, round, 'policy.json', JSON.stringify(gateResult, null, 2));
+        await emit('policy.gate', { round, findings: gateResult.findings.length, blocking: gateResult.blocking.length, approved: gateResult.findings.filter((x) => x.approved).length, rules: [...new Set(gateResult.blocking.map((x) => x.ruleId))] }, round);
+        const unapprovedPolicyFindings: PolicyFinding[] = gateResult.blocking;
+        if (!gateResult.passed) {
+          record.finishedAt = new Date(this.deps.now()).toISOString();
+          await this.deps.recorder.saveRound(runId, record);
+          if (round >= maxRounds) {
+            return await finish('NEEDS_HUMAN', 'POLICY_VIOLATION', `round ${round}: Policy Gate の未承認違反 ${gateResult.blocking.length} 件（${[...new Set(gateResult.blocking.map((x) => x.ruleId))].join(', ')}）、修正上限に到達`);
+          }
+          feedback = { previousRound: round, verificationFailures: [], reviewFindings: [], requirementsUnverified: [], reviewSummary: null, policyFindings: renderPolicyFeedback(gateResult.blocking) };
+          continue; // 検証・レビューは実行しない
         }
 
         // ---- VERIFYING ----
@@ -403,7 +436,8 @@ export class RunEngine {
               .map((c) => `${c.name}: exit=${c.exitCode ?? 'null'}${c.timedOut ? ' (timeout)' : ''}\n${c.stderrExcerpt || c.stdoutExcerpt}`),
             reviewFindings: [],
             requirementsUnverified: [],
-            reviewSummary: null
+            reviewSummary: null,
+            policyFindings: []
           };
           continue; // レビューは実行しない
         }
@@ -481,6 +515,7 @@ export class RunEngine {
             workspaceHashAfterReview: record.workspaceHashAfterReview,
             withinTimeLimit: withinTime(),
             policyViolations: violations,
+            unapprovedPolicyFindings,
             allEventsPersisted: persisted >= lastSequence
           });
           await emit('gate.evaluated', { round, passed: gate.passed, failures: gate.failures }, round);
@@ -499,7 +534,8 @@ export class RunEngine {
           verificationFailures: [],
           reviewFindings: review.parsed.findings,
           requirementsUnverified: review.parsed.requirementsUnverified,
-          reviewSummary: review.parsed.summary
+          reviewSummary: review.parsed.summary,
+          policyFindings: []
         };
       }
       // ループを抜けるのは maxRounds=0 のような異常時のみ

@@ -128,6 +128,25 @@
           {/if}
         </section>
 
+        <section class="card" aria-labelledby="policy-heading" data-testid="policy-findings">
+          <h2 id="policy-heading">Policy Gate（静的チェック）（{report.policyFindings.filter((p) => !p.approved).length} 件未承認）</h2>
+          {#if report.policyFindings.length === 0}
+            <p class="muted">ポリシー違反は検出されていません（eslint-disable / @ts-ignore の追加、テストの skip・削除、検証設定の緩和）。</p>
+          {:else}
+            <ul data-testid="policy-finding-list">
+              {#each report.policyFindings as p, i (`${p.ruleId}:${p.file}:${p.line}:${i}`)}
+                <li>
+                  <StatusBadge label={p.approved ? '承認済み例外' : '未承認'} tone={p.approved ? 'neutral' : 'danger'} />
+                  <strong>{p.ruleId}</strong> <code>{p.file}:{p.line}</code>
+                  <div>{p.message}</div>
+                  <div class="small"><code>{p.evidence}</code>{#if p.approvalReason}（理由: {p.approvalReason}）{/if}</div>
+                </li>
+              {/each}
+            </ul>
+            <p class="small muted">AI レビューの結果ではこの判定を上書きできません。意図的な例外はベースコミットの <code>.agent-orchestrator/policy.json</code> に理由付きで登録してください。</p>
+          {/if}
+        </section>
+
         <section class="card" aria-labelledby="egress-heading" data-testid="egress-summary">
           <h2 id="egress-heading">ネットワーク（egress プロキシ）</h2>
           {#if !report.egress.available}

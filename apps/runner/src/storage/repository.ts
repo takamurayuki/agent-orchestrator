@@ -1,6 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { ulid } from 'ulid';
-import type { Answer, AskedQuestion, DraftState, Fact, ProjectInfo, ReviewFinding, RoundRecord, RunEvent, RunStatus, Task, TaskProposal } from '@agent-orchestrator/contracts';
+import type { Answer, AskedQuestion, Contradiction, DecisionRecord, DraftState, Fact, ProjectInfo, ReviewFinding, RoundRecord, RunEvent, RunStatus, Task, TaskProposal } from '@agent-orchestrator/contracts';
 import { transaction } from './db.js';
 import { nowIso } from '../config.js';
 
@@ -26,6 +26,8 @@ export interface DraftRow {
   prohibited: string[];
   facts: Fact[];
   summary: string;
+  /** 未解消の矛盾（v2.1） */
+  contradictions: Contradiction[];
   approvedTaskId: string | null;
   createdAt: string;
   updatedAt: string;
@@ -102,14 +104,29 @@ export class Repository {
     return (this.db.prepare('SELECT * FROM drafts ORDER BY updated_at DESC LIMIT ?').all(limit) as Record<string, unknown>[]).map(mapDraft);
   }
 
-  updateDraft(id: string, patch: Partial<Pick<DraftRow, 'state' | 'round' | 'blockedReason' | 'facts' | 'summary' | 'approvedTaskId' | 'currentRevision'>>): DraftRow {
+  updateDraft(id: string, patch: Partial<Pick<DraftRow, 'state' | 'round' | 'blockedReason' | 'facts' | 'summary' | 'approvedTaskId' | 'currentRevision' | 'contradictions'>>): DraftRow {
     const cur = this.getDraft(id);
     if (!cur) throw new Error(`draft not found: ${id}`);
     const next = { ...cur, ...patch };
     this.db
-      .prepare('UPDATE drafts SET state = ?, round = ?, blocked_reason = ?, facts_json = ?, summary = ?, approved_task_id = ?, current_revision = ?, updated_at = ? WHERE id = ?')
-      .run(next.state, next.round, next.blockedReason, JSON.stringify(next.facts), next.summary, next.approvedTaskId, next.currentRevision, nowIso(), id);
+      .prepare('UPDATE drafts SET state = ?, round = ?, blocked_reason = ?, facts_json = ?, summary = ?, approved_task_id = ?, current_revision = ?, contradictions_json = ?, updated_at = ? WHERE id = ?')
+      .run(next.state, next.round, next.blockedReason, JSON.stringify(next.facts), next.summary, next.approvedTaskId, next.currentRevision, JSON.stringify(next.contradictions), nowIso(), id);
     return this.getDraft(id)!;
+  }
+
+  // ---- decisions (意思決定ログ, v2.1) ----
+  addDecision(draftId: string, decision: DecisionRecord): void {
+    this.db
+      .prepare('INSERT OR REPLACE INTO decisions (id, draft_id, contradiction_id, decision_json, decided_at) VALUES (?, ?, ?, ?, ?)')
+      .run(ulid(), draftId, decision.contradictionId, JSON.stringify(decision), decision.decidedAt);
+  }
+
+  listDecisions(draftId: string): DecisionRecord[] {
+    return (this.db.prepare('SELECT decision_json FROM decisions WHERE draft_id = ? ORDER BY decided_at').all(draftId) as Array<{ decision_json: string }>).map((r) => JSON.parse(r.decision_json) as DecisionRecord);
+  }
+
+  removeDecision(draftId: string, contradictionId: string): void {
+    this.db.prepare('DELETE FROM decisions WHERE draft_id = ? AND contradiction_id = ?').run(draftId, contradictionId);
   }
 
   // ---- revisions ----
@@ -337,6 +354,7 @@ function mapDraft(r: Record<string, unknown>): DraftRow {
     prohibited: JSON.parse(r.prohibited_json as string) as string[],
     facts: JSON.parse(r.facts_json as string) as Fact[],
     summary: r.summary as string,
+    contradictions: JSON.parse((r.contradictions_json as string | undefined) ?? '[]') as Contradiction[],
     approvedTaskId: (r.approved_task_id as string | null) ?? null,
     createdAt: r.created_at as string,
     updatedAt: r.updated_at as string

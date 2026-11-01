@@ -59,12 +59,7 @@ export function assertNoForbiddenFlags(argv: readonly string[]): void {
 
 // ---- diff policy ----
 
-const TEST_FILE_RE = /(^|\/)(__tests__|tests?|spec|e2e)\/|\.(test|spec)\.[cm]?[jt]sx?$|\.(test|spec)\.(py|rb|go|rs)$|_test\.(go|py)$/i;
-const VERIFICATION_CONFIG_RE = /(^|\/)(package\.json|pnpm-lock\.yaml|package-lock\.json|yarn\.lock|tsconfig(\..*)?\.json|vitest\.config\.[cm]?[jt]s|jest\.config\.[cm]?[jt]s|playwright\.config\.[cm]?[jt]s|\.eslintrc(\..*)?|eslint\.config\.[cm]?[jt]s|biome\.json)$/i;
 const FORBIDDEN_PATH_RE = /(^|\/)(\.git\/|\.github\/workflows\/|\.husky\/|\.env(\..*)?$|.*\.pem$|.*\.key$|id_rsa|\.npmrc$|\.pypirc$)/i;
-const SKIP_ADDED_RE = /^\+.*\b(it|test|describe)\.(skip|todo)\s*\(|^\+.*\b(xit|xtest|xdescribe)\s*\(|^\+.*@pytest\.mark\.skip|^\+.*\bt\.Skip\(/m;
-const SCRIPT_WEAKENED_RE = /^-\s*"(typecheck|lint|test:run|test)"\s*:/m;
-const TS_STRICT_WEAKENED_RE = /^\+\s*"strict"\s*:\s*false|^\+\s*"noEmit"\s*:\s*true.*lint|^-\s*"strict"\s*:\s*true/m;
 
 export interface DiffPolicyInput {
   files: readonly DiffFile[];
@@ -83,29 +78,8 @@ export function checkDiffPolicy(input: DiffPolicyInput): PolicyViolation[] {
     if (FORBIDDEN_PATH_RE.test(path)) {
       violations.push({ code: 'FORBIDDEN_PATH', file: f.path, detail: '変更が禁止されたパス（.git/CI/認証ファイル等）' });
     }
-    if (TEST_FILE_RE.test(path) && f.status === 'deleted') {
-      violations.push({ code: 'TEST_FILE_DELETED', file: f.path, detail: '既存テストファイルが削除された' });
-    }
-    const patch = input.patches?.[f.path];
-    if (patch) {
-      if (TEST_FILE_RE.test(path) && SKIP_ADDED_RE.test(patch)) {
-        violations.push({ code: 'TEST_SKIPPED', file: f.path, detail: 'テストが skip/todo/x* に変更された' });
-      }
-      if (VERIFICATION_CONFIG_RE.test(path)) {
-        if (/package\.json$/i.test(path) && SCRIPT_WEAKENED_RE.test(patch)) {
-          violations.push({ code: 'VERIFICATION_CONFIG_WEAKENED', file: f.path, detail: '検証 scripts（typecheck/lint/test:run）が削除・変更された' });
-        }
-        if (/tsconfig/i.test(path) && TS_STRICT_WEAKENED_RE.test(patch)) {
-          violations.push({ code: 'VERIFICATION_CONFIG_WEAKENED', file: f.path, detail: 'tsconfig の strict が弱められた' });
-        }
-        if (/(vitest|jest|playwright)\.config/i.test(path) && /^\+.*\b(testPathIgnorePatterns|exclude|testIgnore)\b/m.test(patch)) {
-          violations.push({ code: 'VERIFICATION_CONFIG_WEAKENED', file: f.path, detail: 'テスト設定に除外が追加された' });
-        }
-      }
-    }
-    if (TEST_FILE_RE.test(path) && f.status === 'modified' && patch === undefined) {
-      // patch が無い場合は判断不能。削除以外は許容するが、呼び出し側は patch を渡すべき
-    }
+    // テスト削除・skip・検証設定の緩和は v2.1 から Policy Gate（policy-gate.ts、AST 解析・ベース比較）が担当する。
+    // ここは即時停止すべきセキュリティ系（worktree 外・禁止パス）だけを残す
   }
   return violations;
 }

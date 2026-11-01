@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AskedQuestion, Fact } from '@agent-orchestrator/contracts';
-import { analyzeGap, renderInterviewPrompt, validateProposal } from '../../src/requirements/gap-analyzer.js';
+import { analyzeContradictions, analyzeGap, contradictionsToQuestions, renderContradictionPrompt, renderInterviewPrompt, validateProposal } from '../../src/requirements/gap-analyzer.js';
 
 const q = (id: string, impact: 'blocking' | 'non_blocking' = 'blocking', text = `質問 ${id}?`, options: Array<{ value: string; label: string }> = []) => ({ id, question: text, decisionImpact: impact, options, recommendation: '推奨: A。理由: 既存方式に合う。リスク: なし' });
 const inspectorFacts: Fact[] = [{ key: 'framework', value: 'Svelte', source: 'package.json', confidence: 'confirmed' }];
@@ -86,6 +86,24 @@ describe('gap analyzer (SPEC §4.1)', () => {
     expect(prompt).toContain('ログインを追加');
     expect(prompt).toContain('untrusted_repository_content');
     expect(prompt).toContain('NOT perform');
+  });
+
+  it('v2.1: contradiction output is validated, decided ones are filtered, blocking/minor split, questions carry evidence and options', () => {
+    const c = (id: string, severity: 'blocking' | 'minor', description = `矛盾 ${id}`) => ({ id, kind: 'requirement_vs_project', severity, description, evidence: ['e1'], options: [{ value: 'a', label: 'A', consequence: 'ca' }, { value: 'b', label: 'B', consequence: 'cb' }], recommendation: 'a' });
+    expect(analyzeContradictions({ nonsense: true }, []).ok).toBe(false);
+    expect(analyzeContradictions({ contradictions: [{ id: 'x', kind: 'requirement_vs_project', severity: 'blocking', description: 'd', evidence: [], options: [{ value: 'a', label: 'A', consequence: 'c' }], recommendation: '' }] }, []).ok).toBe(false); // options < 2
+    const r = analyzeContradictions({ contradictions: [c('CONTRA-001', 'blocking'), c('CONTRA-002', 'minor'), c('CONTRA-003', 'blocking'), c('CONTRA-004', 'blocking', '矛盾 CONTRA-003')] }, [{ contradictionId: 'CONTRA-001', kind: 'requirement_vs_project', question: 'q', chosen: 'a', chosenLabel: 'A', consequence: 'ca', evidence: [], decidedAt: 't' }]);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.blocking.map((x) => x.id)).toEqual(['CONTRA-003']); // 001 は決定済み、004 は 003 と同文で重複
+    expect(r.minor.map((x) => x.id)).toEqual(['CONTRA-002']);
+    const qs = contradictionsToQuestions(r.blocking, 2);
+    expect(qs[0]).toMatchObject({ id: 'CONTRA-CONTRA-003', round: 2, decisionImpact: 'blocking' });
+    expect(qs[0]?.question).toContain('e1');
+    expect(qs[0]?.options[0]?.label).toBe('A — ca');
+    const prompt = renderContradictionPrompt({ request: 'req', facts: [], digestText: '', askedQuestions: [], answers: [], prohibitedOperations: [], summary: 's', proposal: { title: 't', objective: 'o', requirements: ['r1'], outOfScope: [], approach: 'a', acceptanceCriteria: [{ id: 'AC-1', given: 'g', when: 'w', then: 't' }], openItems: [] }, decisions: [{ contradictionId: 'CONTRA-001', kind: 'requirement_vs_project', question: 'q', chosen: 'a', chosenLabel: 'A', consequence: 'ca', evidence: [], decidedAt: 't' }] });
+    expect(prompt).toContain('Decisions already made');
+    expect(prompt).toContain('"r1"');
   });
 
   it('RA-15: vague acceptance criteria (missing then) are rejected', () => {

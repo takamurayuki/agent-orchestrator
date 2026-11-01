@@ -7,3 +7,4 @@ export * from './draft.js';
 export * from './ipc.js';
 export * from './json-schema.js';
 export * from './validate.js';
+export * from './contradiction.js';

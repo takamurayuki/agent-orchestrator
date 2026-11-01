@@ -1,11 +1,11 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { AskedQuestion, DraftApproveResult, DraftState, DraftView, Fact, ProjectInfo, TaskProposal } from '@agent-orchestrator/contracts';
+import { CONTRADICTION_QUESTION_PREFIX, type AskedQuestion, type DecisionRecord, type DraftApproveResult, type DraftState, type DraftView, type Fact, type ProjectInfo, type TaskProposal } from '@agent-orchestrator/contracts';
 import { nowIso } from '../config.js';
 import { detectProhibitedOperations } from '../policy.js';
 import type { Repository, DraftRow } from '../storage/repository.js';
 import { checkProfileReadiness } from '../verification/profiles.js';
-import { analyzeGap, validateProposal, type InterviewModel } from './gap-analyzer.js';
+import { analyzeContradictions, analyzeGap, contradictionsToQuestions, validateProposal, type InterviewModel } from './gap-analyzer.js';
 import { previousAnsweredRound, validateAnswers, type AnswerInput } from './questions.js';
 import { renderDigest, type RepoDigest, type RepoInspector } from './repo-inspector.js';
 import { generateTask, parseAndValidateTaskYaml } from './task-generator.js';
@@ -75,6 +75,28 @@ export class DraftService {
     if (!validated.ok) throw new DraftServiceError('INVALID_PARAMS', validated.error);
     draft = this.deps.repo.updateDraft(draft.id, { state: 'ANSWERING' });
     this.deps.repo.addAnswers(draft.id, validated.answers);
+    // 矛盾質問への回答は意思決定ログに記録する（v2.1）
+    for (const a of validated.answers) {
+      if (!a.questionId.startsWith(CONTRADICTION_QUESTION_PREFIX) || a.skipped || a.value === null) continue;
+      const contradictionId = a.questionId.slice(CONTRADICTION_QUESTION_PREFIX.length);
+      const c = draft.contradictions.find((x) => x.id === contradictionId);
+      const q = current.find((x) => x.id === a.questionId);
+      const opt = c?.options.find((o) => o.value === a.value);
+      const decision: DecisionRecord = {
+        contradictionId,
+        kind: c?.kind ?? 'requirement_vs_requirement',
+        question: c?.description ?? q?.question ?? a.questionId,
+        chosen: a.value,
+        chosenLabel: opt?.label ?? a.value,
+        consequence: opt?.consequence ?? '（自由入力）',
+        evidence: c?.evidence ?? [],
+        decidedAt: a.answeredAt
+      };
+      this.deps.repo.addDecision(draft.id, decision);
+    }
+    if (validated.answers.some((a) => a.questionId.startsWith(CONTRADICTION_QUESTION_PREFIX))) {
+      draft = this.deps.repo.updateDraft(draft.id, { contradictions: draft.contradictions.filter((c) => !validated.answers.some((a) => a.questionId === `${CONTRADICTION_QUESTION_PREFIX}${c.id}` && !a.skipped)) });
+    }
     if (validated.skippedBlocking.length > 0) {
       // 安全性に重要な未確定項目のスキップは許可するが次へ進めない（SPEC §3.1-3）
       draft = this.deps.repo.updateDraft(draft.id, {
@@ -111,6 +133,7 @@ export class DraftService {
     if (rev.approved) throw new DraftServiceError('INVALID_STATE', 'この revision は既に承認済みです');
     const blocking = this.unansweredBlocking(draft);
     if (blocking.length > 0) throw new DraftServiceError('DRAFT_BLOCKED', `blocking の質問が未回答です: ${blocking.join(', ')}`);
+    if (draft.contradictions.some((c) => c.severity === 'blocking')) throw new DraftServiceError('DRAFT_BLOCKED', `重大な矛盾が未解消です: ${draft.contradictions.map((c) => c.id).join(', ')}`);
     const parsed = parseAndValidateTaskYaml(rev.taskYaml);
     if (!parsed.ok) throw new DraftServiceError('VALIDATION_FAILED', `task.yaml が契約に適合しません: ${parsed.errors.join('; ')}`);
     const project = this.deps.repo.getProject(draft.projectId);
@@ -129,6 +152,7 @@ export class DraftService {
     mkdirSync(dir, { recursive: true });
     const yamlPath = join(dir, 'task.yaml');
     writeFileSync(yamlPath, rev.taskYaml, 'utf8');
+    writeFileSync(join(dir, 'decisions.json'), JSON.stringify(this.deps.repo.listDecisions(draft.id), null, 2), 'utf8');
     const approved = this.deps.repo.approveRevision(draft.id, rev.revision, parsed.task, rev.taskYaml, yamlPath);
     draft = this.getDraftOrThrow(draft.id);
     const view = this.emit(this.view(draft));
@@ -222,10 +246,38 @@ export class DraftService {
       draft = this.deps.repo.updateDraft(draft.id, { state: 'BLOCKED', blockedReason: validated.error });
       return this.view(draft);
     }
-    draft = this.deps.repo.updateDraft(draft.id, { state: 'SUMMARY_READY', round });
+    // 矛盾検出（v2.1）: 要件同士 / 要件と既存コード・設定。blocking は承認前に解消させる（質問として差し戻す）
+    const decisions = this.deps.repo.listDecisions(draft.id);
+    const contra = await this.deps.model.detectContradictions(
+      { request: draft.request, facts: draft.facts, digestText: renderDigest(ctx.digest), askedQuestions: asked, answers, prohibitedOperations: draft.prohibited, summary: a.interview.summary, proposal: validated.value, decisions },
+      signal
+    );
+    if (!contra.ok) {
+      draft = this.deps.repo.updateDraft(draft.id, { state: 'BLOCKED', blockedReason: `矛盾検出を実行できません: ${contra.error}` });
+      return this.view(draft);
+    }
+    const contraAnalysis = analyzeContradictions(contra.value, decisions);
+    if (!contraAnalysis.ok) {
+      draft = this.deps.repo.updateDraft(draft.id, { state: 'BLOCKED', blockedReason: contraAnalysis.error });
+      return this.view(draft);
+    }
+    if (contraAnalysis.blocking.length > 0) {
+      const nextRound = round + 1;
+      const questions = contradictionsToQuestions(contraAnalysis.blocking, nextRound);
+      const totalAsked = asked.length + questions.length;
+      if (totalAsked > 15 || nextRound > 5) {
+        draft = this.deps.repo.updateDraft(draft.id, { state: 'BLOCKED', contradictions: contraAnalysis.blocking, blockedReason: `重大な矛盾が未解消のまま質問上限に達しました: ${contraAnalysis.blocking.map((c) => c.description).join(' / ')}。依頼内容を見直してください。` });
+        return this.view(draft);
+      }
+      this.deps.repo.addQuestions(draft.id, questions);
+      draft = this.deps.repo.updateDraft(draft.id, { state: 'ASKING', round: nextRound, contradictions: contraAnalysis.blocking, summary: a.interview.summary });
+      return this.view(draft);
+    }
+    const proposalWithMinor: TaskProposal = contraAnalysis.minor.length > 0 ? { ...validated.value, openItems: [...validated.value.openItems, ...contraAnalysis.minor.map((c) => `軽微な矛盾: ${c.description}（推奨: ${c.recommendation}）`)] } : validated.value;
+    draft = this.deps.repo.updateDraft(draft.id, { state: 'SUMMARY_READY', round, contradictions: [] });
     const current = this.deps.repo.getRevision(draft.id, draft.currentRevision);
     const revision = current && !current.approved && !current.proposal ? current.revision : this.deps.repo.createRevision(draft.id, null, null, []).revision;
-    draft = this.finalizeRevision(draft, revision, validated.value);
+    draft = this.finalizeRevision(draft, revision, proposalWithMinor);
     return this.view(draft);
   }
 
@@ -253,6 +305,9 @@ export class DraftService {
     if (target === null) throw new DraftServiceError('INVALID_STATE', '戻れる回答がありません');
     // target より後のラウンドの質問（未回答）を削除し、target の回答を取り消す
     for (const q of this.deps.repo.listQuestions(draft.id)) if (q.round > target) this.deps.repo.removeQuestionsForRound(draft.id, q.round);
+    for (const a of this.deps.repo.listAnswers(draft.id)) {
+      if (a.round === target && a.questionId.startsWith(CONTRADICTION_QUESTION_PREFIX)) this.deps.repo.removeDecision(draft.id, a.questionId.slice(CONTRADICTION_QUESTION_PREFIX.length));
+    }
     this.deps.repo.retractAnswersForRound(draft.id, target);
     const current = this.deps.repo.getRevision(draft.id, draft.currentRevision);
     if (current && !current.approved && current.proposal) {
@@ -289,6 +344,8 @@ export class DraftService {
       blockedReason: draft.state === 'BLOCKED' ? draft.blockedReason : null,
       prohibitedOperations: draft.prohibited,
       verificationReadiness: info?.verificationProfile ? { profile: info.verificationProfile.name, ready: info.verificationProfile.ready, missingScripts: info.verificationProfile.missingScripts, detail: info.verificationProfile.ready ? '実行可能' : `scripts 不足: ${info.verificationProfile.missingScripts.join(', ') || 'lockfile 等'}` } : null,
+      contradictions: draft.contradictions,
+      decisions: this.deps.repo.listDecisions(draft.id),
       approved: rev?.approved ?? false,
       approvedTaskId: draft.approvedTaskId,
       createdAt: draft.createdAt,

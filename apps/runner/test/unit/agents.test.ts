@@ -40,7 +40,7 @@ describe('Claude Builder adapter', () => {
 
   it('renders feedback from previous round into the prompt', () => {
     const prompt = renderBuilderPrompt(
-      builderInput({ previousRound: 1, verificationFailures: ['test:run: exit=1\nFAIL login'], reviewFindings: [{ id: 'REV-1', severity: 'high', file: 'a.ts', line: 3, description: 'leak', evidence: 'e', recommendation: 'fix' }], requirementsUnverified: ['logout'], reviewSummary: 'needs work' })
+      builderInput({ previousRound: 1, verificationFailures: ['test:run: exit=1\nFAIL login'], reviewFindings: [{ id: 'REV-1', severity: 'high', file: 'a.ts', line: 3, description: 'leak', evidence: 'e', recommendation: 'fix' }], requirementsUnverified: ['logout'], reviewSummary: 'needs work', policyFindings: ['[PG-ESLINT-DISABLE] a.ts:2 — 新規の eslint-disable'] })
     );
     expect(prompt).toContain('FAIL login');
     expect(prompt).toContain('REV-1');

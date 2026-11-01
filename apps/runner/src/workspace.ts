@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { DiffFile, DiffSummary } from '@agent-orchestrator/contracts';
@@ -144,6 +144,28 @@ export class WorkspaceManager {
       const summary: DiffSummary = { files, isEmpty: files.length === 0, patchBytes, truncated };
       return { summary, patch, patches: splitPatchByFile(patchRaw) };
     });
+  }
+
+  /** ベースコミット時点のファイル内容（無ければ null）。Policy Gate の「既存の違反」判定と、人間管理の例外ファイルの読み出しに使う。 */
+  async readBaseFile(workspace: WorkspaceHandle, relPath: string): Promise<string | null> {
+    if (relPath.startsWith('/') || relPath.includes('..')) return null;
+    const result = await this.run({ command: 'git', args: ['show', `${workspace.baseSha}:${relPath.replace(/\\/g, '/')}`], cwd: workspace.path, env: { GIT_TERMINAL_PROMPT: '0', GIT_CONFIG_NOSYSTEM: '1' }, inheritEnv: true, timeoutMs: 60_000, maxOutputBytes: 4 * 1024 * 1024 });
+    return result.exitCode === 0 ? result.stdout : null;
+  }
+
+  /** 作業ツリーのファイル内容（テキスト、上限 2MB。無い/バイナリ/大きすぎる場合は null） */
+  readWorkspaceFile(workspace: WorkspaceHandle, relPath: string): string | null {
+    if (relPath.startsWith('/') || relPath.includes('..')) return null;
+    try {
+      const abs = join(workspace.path, ...relPath.split('/'));
+      const st = statSync(abs);
+      if (!st.isFile() || st.size > 2 * 1024 * 1024) return null;
+      const buf = readFileSync(abs);
+      if (buf.subarray(0, 1024).includes(0)) return null;
+      return buf.toString('utf8');
+    } catch {
+      return null;
+    }
   }
 
   /** ワークスペース内容のハッシュ（未追跡含む tree hash）。レビュー前後の比較に使う。 */

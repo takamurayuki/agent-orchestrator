@@ -242,6 +242,9 @@ importers:
       '@agent-orchestrator/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      typescript:
+        specifier: ~5.9.3
+        version: 5.9.3
       ulid:
         specifier: ^3.0.2
         version: 3.0.2

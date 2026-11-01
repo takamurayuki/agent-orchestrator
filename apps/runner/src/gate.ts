@@ -1,4 +1,4 @@
-import { reviewConsistencyErrors, type DiffSummary, type PolicyViolation, type Review, type ReviewOutcome, type VerificationResult } from '@agent-orchestrator/contracts';
+import { reviewConsistencyErrors, type DiffSummary, type PolicyFinding, type PolicyViolation, type Review, type ReviewOutcome, type VerificationResult } from '@agent-orchestrator/contracts';
 
 /**
  * 完了ゲート（SPEC §6.1）。純粋関数。すべて満たしたときだけ COMPLETED にできる。
@@ -15,6 +15,8 @@ export interface GateInput {
   workspaceHashAfterReview: string | null;
   withinTimeLimit: boolean;
   policyViolations: readonly PolicyViolation[];
+  /** Policy Gate（v2.1）の未承認 blocking 検出。1 件でもあれば COMPLETED にしない。AI レビューの approved では上書きできない */
+  unapprovedPolicyFindings?: readonly PolicyFinding[];
   allEventsPersisted: boolean;
 }
 
@@ -97,6 +99,7 @@ export function evaluateCompletionGate(input: GateInput): GateResult {
   // 7. 制限時間内、禁止操作なし、イベント永続化
   if (!input.withinTimeLimit) fail(7, 'TIME_LIMIT_EXCEEDED', '制限時間を超過した');
   for (const p of input.policyViolations) fail(7, 'POLICY_VIOLATION', `${p.code}: ${p.file} ${p.detail}`);
+  for (const p of (input.unapprovedPolicyFindings ?? []).filter((x) => !x.approved && x.severity === 'blocking')) fail(7, 'POLICY_VIOLATION', `${p.ruleId}: ${p.file}:${p.line} ${p.message}`);
   if (!input.allEventsPersisted) fail(7, 'EVENTS_NOT_PERSISTED', 'イベントの永続化が確認できない');
 
   return { passed: failures.length === 0, failures };

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { RunEngine } from '../../src/engine.js';
+import { evaluateCompletionGate } from '../../src/gate.js';
 import {
   approvedReview,
   createMockDeps,
@@ -7,6 +8,7 @@ import {
   failVerification,
   highReview,
   okBuilder,
+  okVerification,
   reviewOutcome,
   snapshot,
   timeoutVerification
@@ -186,11 +188,74 @@ describe('RunEngine state machine (SPEC §6)', () => {
     expect(status.reasonCode).toBe('WORKSPACE_MODIFIED_DURING_REVIEW');
   });
 
-  it('policy violation (test deleted) → NEEDS_HUMAN / POLICY_VIOLATION', async () => {
-    const mock = createMockDeps({ diffs: [diffCapture([{ path: 'src/login.test.ts', status: 'deleted', additions: 0, deletions: 20 }])] });
+  it('security violation (path escape) → immediate NEEDS_HUMAN / POLICY_VIOLATION', async () => {
+    const mock = createMockDeps({ diffs: [diffCapture([{ path: '../outside.txt', status: 'added', additions: 1, deletions: 0 }])] });
     const status = await runWith(mock);
     expect(status.reasonCode).toBe('POLICY_VIOLATION');
     expect(mock.calls.verifier).toBe(0);
+    expect(mock.calls.builder).toBe(1);
+  });
+
+  it('v2.1 case 7: an unapproved Policy Gate violation is fed back to the Builder and never reaches COMPLETED while it persists', async () => {
+    const withDisable = "export function f(x: any) {\n  // eslint-disable-next-line @typescript-eslint/no-explicit-any\n  return x;\n}\n";
+    const mock = createMockDeps({
+      diffs: [diffCapture([{ path: 'src/f.ts', status: 'added', additions: 4, deletions: 0 }])],
+      currentContents: { 'src/f.ts': withDisable }
+    });
+    const status = await runWith(mock);
+    expect(status.state).toBe('NEEDS_HUMAN');
+    expect(status.reasonCode).toBe('POLICY_VIOLATION');
+    expect(status.reasonDetail).toContain('PG-ESLINT-DISABLE');
+    // 3 ラウンドとも Builder に差し戻され、検証・レビューは一度も実行されない
+    expect(mock.calls.builder).toBe(3);
+    expect(mock.calls.verifier).toBe(0);
+    expect(mock.calls.reviewer).toBe(0);
+    expect(mock.builderInputs[1]?.feedback?.policyFindings.join(' ')).toContain('PG-ESLINT-DISABLE');
+    expect(mock.recorder.artifacts.has('1/policy.json')).toBe(true);
+    expect(mock.recorder.events.some((e) => e.type === 'policy.gate' && e.payload.blocking === 1)).toBe(true);
+  });
+
+  it('v2.1 case 8: once the Builder removes the violation, verification and review run and the run can complete', async () => {
+    const withDisable = "export function f(x: any) {\n  // eslint-disable-next-line @typescript-eslint/no-explicit-any\n  return x;\n}\n";
+    const fixed = 'export function f(x: unknown) {\n  return x;\n}\n';
+    const mock = createMockDeps({
+      diffs: [diffCapture([{ path: 'src/f.ts', status: 'added', additions: 4, deletions: 0 }])],
+      currentContents: [{ 'src/f.ts': withDisable }, { 'src/f.ts': fixed }]
+    });
+    const status = await runWith(mock);
+    expect(status.state).toBe('COMPLETED');
+    expect(mock.calls.builder).toBe(2);
+    expect(mock.calls.verifier).toBe(1);
+    expect(mock.calls.reviewer).toBe(1);
+    expect(mock.recorder.rounds.get(2)?.policyFindings).toEqual([]);
+  });
+
+  it('v2.1: a human-approved exception in the BASE commit lets the violation pass; the AI cannot add one in the working tree', async () => {
+    const withDisable = "// eslint-disable-next-line no-console\nconsole.log('x');\n";
+    const approvedRun = createMockDeps({
+      diffs: [diffCapture([{ path: 'src/log.ts', status: 'added', additions: 2, deletions: 0 }])],
+      currentContents: { 'src/log.ts': withDisable, '.agent-orchestrator/policy.json': '{"allow":[{"ruleId":"PG-ESLINT-DISABLE","reason":"ai-added"}]}' },
+      policyExceptionsJson: JSON.stringify({ allow: [{ ruleId: 'PG-ESLINT-DISABLE', file: 'src/**', reason: 'ログ出力は console を許容（人間が承認）' }] })
+    });
+    const approved = await runWith(approvedRun);
+    expect(approved.state).toBe('COMPLETED');
+    expect(approvedRun.recorder.rounds.get(1)?.policyFindings[0]?.approved).toBe(true);
+    // 作業ツリー側にだけ例外ファイルを置いても（AI が追加しても）効かない
+    const aiOnly = createMockDeps({
+      diffs: [diffCapture([{ path: 'src/log.ts', status: 'added', additions: 2, deletions: 0 }, { path: '.agent-orchestrator/policy.json', status: 'added', additions: 1, deletions: 0 }])],
+      currentContents: { 'src/log.ts': withDisable, '.agent-orchestrator/policy.json': '{"allow":[{"ruleId":"PG-ESLINT-DISABLE","reason":"ai-added"}]}' }
+    });
+    const rejected = await runWith(aiOnly);
+    expect(rejected.state).toBe('NEEDS_HUMAN');
+    expect(rejected.reasonCode).toBe('POLICY_VIOLATION');
+  });
+
+  it('v2.1: an approved review verdict cannot override an unapproved Policy Gate finding (gate 7)', () => {
+    // 完了ゲートの純粋関数レベルでも確認
+    const finding = { ruleId: 'PG-TEST-SKIP' as const, severity: 'blocking' as const, file: 'test/a.test.ts', line: 3, evidence: 'it.skip', message: 'skip', approved: false, approvalReason: null };
+    const base = { taskApproved: true, verification: okVerification(), expectedVerificationCommands: ['install', 'typecheck', 'lint', 'test:run'], diff: diffCapture().summary, review: reviewOutcome(approvedReview()), blockingSeverities: ['critical', 'high'], workspaceHashBeforeReview: 'h', workspaceHashAfterReview: 'h', withinTimeLimit: true, policyViolations: [], allEventsPersisted: true };
+    expect(evaluateCompletionGate({ ...base, unapprovedPolicyFindings: [finding] }).failures.map((f) => f.code)).toContain('POLICY_VIOLATION');
+    expect(evaluateCompletionGate({ ...base, unapprovedPolicyFindings: [{ ...finding, approved: true }] }).passed).toBe(true);
   });
 
   it('time limit exceeded → NEEDS_HUMAN / TIMEOUT', async () => {

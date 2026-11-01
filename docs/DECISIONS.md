@@ -163,6 +163,19 @@ SPEC.md を唯一の要件ベースラインとし、契約の曖昧さ・不整
 - **理由:** ドッグフーディング（自己リポジトリ）で、差分に大きな JSON が含まれたレビュー用プロンプトを argv に載せたところ、Windows の `docker` クライアント起動時に argv 長制限（約 32 KB）で spawn が失敗し、2 ms で `exitCode=null` の結果が返ってレビューが「不正 JSON」扱いになった。失敗の原因が結果に現れず診断に時間がかかった。
 - **影響・対処:** プロンプト長の上限が実質なくなる（Codex 側のコンテキスト上限は別）。回帰テスト `agents.test.ts`（argv にプロンプト本文が無い、stdin に含まれる、spawn 失敗はエラー）。
 
+## D-29 Policy Gate（v2.1）: AI レビューと独立した静的ポリシーチェック
+
+- **決定:** 各ラウンドの差分取得直後に `policy-gate.ts` を実行する。対象は 8 ルール（新規 eslint-disable、新規 @ts-ignore/@ts-nocheck、テストの skip/only/todo 追加、テストファイル削除、必須検証 scripts の削除・無効化・変更、tsconfig の strict 系緩和・exclude 追加、ESLint ルールの off 化・格下げ・ignores 追加、Vitest/Jest/Playwright の除外追加・passWithNoTests）。判定はベースコミットの内容と作業ツリーの内容を**内容の多重集合**で比較し、既存の違反・移動は数えない。コメント・テスト構文・設定ファイルは TypeScript コンパイラ API（スキャナ / AST）で解析し、文字列内の一致は無視する。検出結果は `ruleId / file / line / evidence / message / approved` を持ち `rounds/<n>/policy.json` と `policy.gate` イベントに記録する。
+- **運用:** 未承認 blocking があれば検証・レビューを行わず Builder に差し戻す（残試行があれば。無ければ `NEEDS_HUMAN / POLICY_VIOLATION`）。完了ゲート 7 でも未承認 blocking を不合格にするため、Reviewer の `approved` では上書きできない。例外は**ベースコミット**の `.agent-orchestrator/policy.json`（`{"allow":[{"ruleId","file"(glob),"reason"}]}`）からのみ読み、作業ツリー側（= AI が今回の Run で書いた内容）は無視する。従来の regex ベースの差分ポリシー（`policy.ts`）はセキュリティ系（worktree 外・禁止パス）だけを残し即時停止とする。
+- **理由:** ドッグフーディングで Builder が依頼と規約の矛盾を `eslint-disable-next-line` で回避し、Codex がそれを指摘せず approved になった（人間レビューと唯一不一致）。AI 同士の合意に依存しない機械的なゲートが必要。regex では文字列内の一致や既存違反の再検出で偽陽性が出るため AST を使う。
+- **影響・対処:** TypeScript が runner の実行時依存になる（SEA バンドルが約 9 MB 増）。偽陽性・偽陰性の調査結果は `docs/QUALITY_REPORT.md` に記録。回帰テスト `policy-gate.test.ts`、`engine.test.ts`。
+
+## D-30 Requirements Agent の矛盾検出と意思決定ログ（v2.1）
+
+- **決定:** 素案（TaskProposal）確定後、承認前に 3 回目のモデル呼び出し「矛盾検出」を行う（`contradiction.schema.json`: `id / kind(requirement_vs_requirement | requirement_vs_project) / severity(blocking | minor) / description / evidence / options(2 件以上) / recommendation`）。入力は要件・受入条件・facts・ダイジェスト・既回答・既決定。`RepoInspector` は ESLint ルール（error / off、`no-restricted-*` のメッセージ、ignores）と tsconfig の strict 系フラグを facts に加え、要件と既存設定の矛盾を検出可能にする。blocking の矛盾は `CONTRA-<id>` の blocking 質問（選択肢 = options、根拠付き）として次ラウンドで提示し、解消されるまで承認できない（スキップは BLOCKED）。回答は意思決定ログ（SQLite `decisions`、`tasks/<id>/revisions/<rev>/decisions.json`、DraftView.decisions）に記録し、次回の矛盾検出には「既決定」として渡して再提示しない。minor は素案の openItems に追記する。モデル出力が不正・失敗なら BLOCKED（RA-15 と同じ fail-closed）。
+- **理由:** ドッグフーディングで、依頼（「必ずテンプレートリテラル」）とプロジェクト規約（lint で禁止）の矛盾がヒアリングで検出されず、Builder が `eslint-disable` で回避した。矛盾は人間が判断すべき事項であり、推奨値で隠さず選択肢として提示する（SPEC §3.3）。
+- **影響・対処:** ヒアリングのモデル呼び出しが 1 回増える（約 30〜60 秒）。質問上限（5 ラウンド / 15 問）は矛盾質問にも適用し、超えれば BLOCKED。回帰テスト `draft-service.test.ts`（ケース 9 / 10、スキップ、戻る、minor、不正出力）、`gap-analyzer.test.ts`、`repo-inspector.test.ts`。
+
 ## 残課題（未実装 / 未実測）
 
 - コード署名（署名鍵が無いため未実施。NSIS インストーラは作成・実測済み）。

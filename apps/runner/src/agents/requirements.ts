@@ -1,6 +1,6 @@
 import { loadJsonSchema } from '@agent-orchestrator/contracts';
 import { CONTAINER_WORKSPACE, type SandboxExecutor } from '../isolation/types.js';
-import { INTERVIEW_SYSTEM_PROMPT, PROPOSAL_SYSTEM_PROMPT, renderInterviewPrompt, renderProposalPrompt, type InterviewModel, type InterviewRequest, type ModelResult, type ProposalRequest } from '../requirements/gap-analyzer.js';
+import { CONTRADICTION_SYSTEM_PROMPT, INTERVIEW_SYSTEM_PROMPT, PROPOSAL_SYSTEM_PROMPT, renderContradictionPrompt, renderInterviewPrompt, renderProposalPrompt, type ContradictionRequest, type InterviewModel, type InterviewRequest, type ModelResult, type ProposalRequest } from '../requirements/gap-analyzer.js';
 import { buildClaudeArgs, parseClaudeJson, type ClaudeCredentials } from './claude.js';
 
 /**
@@ -58,6 +58,10 @@ export class ClaudeInterviewModel implements InterviewModel {
 
   propose(request: ProposalRequest, signal: AbortSignal): Promise<ModelResult<unknown>> {
     return this.call(`draft-${Date.now().toString(36)}`, 'proposal', PROPOSAL_SYSTEM_PROMPT, renderProposalPrompt(request), loadJsonSchema('taskProposal'), signal);
+  }
+
+  detectContradictions(request: ContradictionRequest, signal: AbortSignal): Promise<ModelResult<unknown>> {
+    return this.call(`draft-${Date.now().toString(36)}`, 'contradictions', CONTRADICTION_SYSTEM_PROMPT, renderContradictionPrompt(request), loadJsonSchema('contradiction'), signal);
   }
 }
 

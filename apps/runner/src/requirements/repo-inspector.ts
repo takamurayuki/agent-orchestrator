@@ -3,6 +3,7 @@ import { join, relative, resolve, sep } from 'node:path';
 import type { Fact, ProjectInfo } from '@agent-orchestrator/contracts';
 import type { RunnerConfig } from '../config.js';
 import { checkProfileReadiness } from '../verification/profiles.js';
+import { collectEslintSettings, parseJsonc } from '../policy-gate.js';
 import type { WorkspaceManager } from '../workspace.js';
 
 /**
@@ -216,7 +217,29 @@ export class RepoInspector {
     if (authPaths.length > 0) fact('auth.existing', `認証関連と思われるファイル: ${authPaths.slice(0, 5).join(', ')}${authPaths.length > 5 ? ' ほか' : ''}`, authPaths[0] ?? '', 'inferred');
     if (authDeps.length === 0 && authPaths.length === 0) fact('auth.existing', '既存の認証機構は検出できず（無いとは断定しない）', 'package.json / ファイル一覧', 'unknown');
 
-    if (files.includes('tsconfig.json')) fact('language', 'TypeScript', 'tsconfig.json', 'confirmed');
+    if (files.includes('tsconfig.json')) {
+      fact('language', 'TypeScript', 'tsconfig.json', 'confirmed');
+      const tsText = readText('tsconfig.json');
+      const tsCfg = tsText ? parseJsonc('tsconfig.json', tsText) : null;
+      const opts = (tsCfg?.compilerOptions as Record<string, unknown> | undefined) ?? {};
+      const strictOn = ['strict', 'noImplicitAny', 'strictNullChecks', 'noUnusedLocals', 'noUncheckedIndexedAccess', 'exactOptionalPropertyTypes'].filter((k) => opts[k] === true);
+      if (strictOn.length > 0) fact('typescript.strictness', `有効: ${strictOn.join(', ')}`, 'tsconfig.json', 'confirmed');
+    }
+    // ESLint ルール（要件との矛盾検出に使う。error 相当のルール名と、no-restricted-* のメッセージを抜粋）
+    const eslintFile = files.find((f) => /^(eslint\.config\.[cm]?[jt]s|\.eslintrc(\.[cm]?js|\.json)?)$/.test(f));
+    if (eslintFile) {
+      const text = readText(eslintFile);
+      if (text) {
+        const settings = collectEslintSettings(eslintFile, text);
+        const errors = settings.rules.filter((r) => r.severity === 'error' || r.severity === '2').map((r) => r.rule);
+        const offs = settings.rules.filter((r) => r.severity === 'off' || r.severity === '0').map((r) => r.rule);
+        if (errors.length > 0) fact('lint.rules.error', errors.slice(0, 25).join(', ') + (errors.length > 25 ? ' ほか' : ''), eslintFile, 'confirmed');
+        if (offs.length > 0) fact('lint.rules.off', offs.slice(0, 15).join(', '), eslintFile, 'confirmed');
+        const restricted = [...text.matchAll(/message\s*:\s*['"`]([^'"`]{1,160})['"`]/g)].map((m) => m[1]);
+        if (restricted.length > 0) fact('lint.restrictions', restricted.slice(0, 5).join(' / '), eslintFile, 'confirmed');
+        if (settings.ignores.length > 0) fact('lint.ignores', settings.ignores.slice(0, 10).join(', '), eslintFile, 'confirmed');
+      }
+    }
     if (files.includes('pnpm-workspace.yaml')) fact('monorepo', 'pnpm workspace', 'pnpm-workspace.yaml', 'confirmed');
 
     const readiness = checkProfileReadiness(root, 'node-pnpm');

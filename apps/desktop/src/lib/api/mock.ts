@@ -111,6 +111,8 @@ export class MockTransport implements Transport {
         taskYaml: null,
         validationErrors: [],
         blockedReason: null,
+        contradictions: [],
+        decisions: [],
         prohibitedOperations: prohibited,
         verificationReadiness: {
           profile: 'node-pnpm',
@@ -314,6 +316,7 @@ export class MockTransport implements Transport {
         egress: done || partial
           ? { available: true, allowed: 14, denied: 2, errors: 0, allowedHosts: ['api.anthropic.com', 'chatgpt.com', 'registry.npmjs.org'], deniedHosts: [{ host: 'ab.chatgpt.com', count: 2 }], errorHosts: [] }
           : { available: false, allowed: 0, denied: 0, errors: 0, allowedHosts: [], deniedHosts: [], errorHosts: [] },
+        policyFindings: partial ? [{ ruleId: 'PG-ESLINT-DISABLE', severity: 'blocking', file: 'src/auth/login.ts', line: 12, evidence: '// eslint-disable-next-line no-restricted-syntax', message: '新規の eslint-disable コメント', approved: false, approvalReason: null }] : [],
         openFindings: done
           ? [
               {

@@ -99,6 +99,10 @@ export interface MockOptions {
   reviews?: Array<ReviewOutcome | ((input: ReviewerInput) => Promise<ReviewOutcome>)>;
   diffs?: DiffCapture[];
   hashes?: string[];
+  /** Policy Gate 用: ベース / 作業ツリーのファイル内容（ラウンドごとに切替可: 配列なら round 番号で選ぶ） */
+  baseContents?: Record<string, string | null>;
+  currentContents?: Array<Record<string, string | null>> | Record<string, string | null>;
+  policyExceptionsJson?: string | null;
   hasActiveRun?: boolean;
   now?: () => number;
 }
@@ -127,6 +131,13 @@ export function createMockDeps(options: MockOptions = {}) {
         const h = options.hashes?.[Math.min(calls.hash, (options.hashes?.length ?? 1) - 1)] ?? 'hash-1';
         calls.hash++;
         return h;
+      },
+      readBaseFile: async (_ws, rel) => (rel === '.agent-orchestrator/policy.json' ? (options.policyExceptionsJson ?? null) : (options.baseContents?.[rel] ?? null)),
+      readWorkspaceFile: (_ws, rel) => {
+        const c = options.currentContents;
+        if (!c) return null;
+        const map = Array.isArray(c) ? c[Math.min(Math.max(calls.builder - 1, 0), c.length - 1)] : c;
+        return map?.[rel] ?? null;
       }
     },
     builder: {

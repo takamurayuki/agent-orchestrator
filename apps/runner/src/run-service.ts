@@ -205,7 +205,8 @@ export class RunService {
       requirementsUnverified: lastReview?.requirementsUnverified ?? [],
       reportPath,
       worktreePath: run.worktreePath,
-      egress: summarizeEgress(join(run.runDir, 'egress.jsonl'))
+      egress: summarizeEgress(join(run.runDir, 'egress.jsonl')),
+      policyFindings: last?.policyFindings ?? []
     };
   }
 

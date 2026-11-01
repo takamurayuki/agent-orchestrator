@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { FactSchema, QuestionSchema } from './interview.js';
 import { TaskProposalSchema } from './task-proposal.js';
+import { ContradictionSchema, DecisionRecordSchema } from './contradiction.js';
 
 /** 会話状態機械（SPEC §5）。 */
 export const DRAFT_STATES = [
@@ -66,6 +67,10 @@ export const DraftViewSchema = z.strictObject({
   /** 依頼文に含まれていた禁止操作（push/merge/deploy 等）。実行せず手動対応を案内する */
   prohibitedOperations: z.array(z.string()),
   verificationReadiness: VerificationReadinessSchema.nullable(),
+  /** 未解消の矛盾（v2.1）。blocking が残る間は承認できない */
+  contradictions: z.array(ContradictionSchema).default([]),
+  /** 意思決定ログ（矛盾へのユーザー判断、v2.1） */
+  decisions: z.array(DecisionRecordSchema).default([]),
   approved: z.boolean(),
   approvedTaskId: z.string().nullable(),
   createdAt: z.string(),

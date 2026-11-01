@@ -130,6 +130,10 @@ export function renderBuilderPrompt(input: BuilderInput): string {
       for (const r of input.feedback.requirementsUnverified) lines.push(`- ${r}`);
     }
     if (input.feedback.reviewSummary) lines.push('', `Reviewer summary: ${input.feedback.reviewSummary}`);
+    if (input.feedback.policyFindings.length > 0) {
+      lines.push('', '### Policy Gate violations (static check, independent of the reviewer)', 'These are blocking. Do NOT disable or weaken rules, tests or verification scripts; fix the code so the rule is satisfied. If a requirement conflicts with a project rule, implement the rule-compliant variant and explain the conflict in your summary.');
+      for (const p of input.feedback.policyFindings) lines.push(`- ${p}`);
+    }
   }
   lines.push('', `This is implementation attempt ${input.round} of ${t.limits.maxImplementationAttempts}. Implement the task now.`);
   return lines.join('\n');

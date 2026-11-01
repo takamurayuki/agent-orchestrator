@@ -69,6 +69,13 @@ export function renderReport(input: ReportInput): string {
     lines.push('');
   }
 
+  const lastPolicy = last?.policyFindings ?? [];
+  if (lastPolicy.length > 0) {
+    lines.push('## Policy Gate（静的チェック、最終ラウンド）');
+    for (const p of lastPolicy) lines.push(`- [${p.approved ? '承認済み例外' : '未承認 blocking'}] ${p.ruleId} ${p.file}:${p.line} — ${maskSecrets(p.message)}（${maskSecrets(p.evidence)}${p.approvalReason ? `／理由: ${maskSecrets(p.approvalReason)}` : ''}）`);
+    lines.push('');
+  }
+
   const lastReview = [...rounds].reverse().find((r) => r.review?.parsed)?.review?.parsed ?? null;
   if (lastReview) {
     lines.push('## レビュー概要（最終）');

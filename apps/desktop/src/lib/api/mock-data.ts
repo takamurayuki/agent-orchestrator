@@ -491,6 +491,7 @@ export function seedHistory(): Array<{ run: RunStatus; report: RunReportResult }
         openFindings: [],
         requirementsUnverified: [],
         egress: { available: true, allowed: 14, denied: 2, errors: 0, allowedHosts: ['api.anthropic.com', 'chatgpt.com', 'registry.npmjs.org'], deniedHosts: [{ host: 'ab.chatgpt.com', count: 2 }], errorHosts: [] },
+        policyFindings: [],
         reportPath: completed.runDir + '\\report.md',
         worktreePath: completed.worktreePath
       }
@@ -528,6 +529,7 @@ export function seedHistory(): Array<{ run: RunStatus; report: RunReportResult }
         ],
         requirementsUnverified: ['Excel で開いた際に文字化けしないこと（BOM 付き UTF-8）'],
         egress: { available: true, allowed: 14, denied: 2, errors: 0, allowedHosts: ['api.anthropic.com', 'chatgpt.com', 'registry.npmjs.org'], deniedHosts: [{ host: 'ab.chatgpt.com', count: 2 }], errorHosts: [] },
+        policyFindings: [],
         reportPath: needsHuman.runDir + '\\report.md',
         worktreePath: needsHuman.worktreePath
       }

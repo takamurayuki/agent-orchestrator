@@ -1,6 +1,93 @@
 // 自動生成: pnpm --filter @agent-orchestrator/contracts run gen:schemas（編集しない）
 // 元: packages/contracts/schemas/*.schema.json
 export const EMBEDDED_SCHEMAS: Record<string, Record<string, unknown>> = {
+  "contradiction.schema.json": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "Requirements Contradictions v1",
+    "description": "Requirements Agent が task 素案の確定前に行う矛盾検出の出力。要件同士、要件と既存コード・設定（lint ルール、型設定、既存実装）の矛盾を列挙する。",
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "contradictions"
+    ],
+    "properties": {
+      "contradictions": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "kind",
+            "severity",
+            "description",
+            "evidence",
+            "options",
+            "recommendation"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "kind": {
+              "enum": [
+                "requirement_vs_requirement",
+                "requirement_vs_project"
+              ]
+            },
+            "severity": {
+              "enum": [
+                "blocking",
+                "minor"
+              ]
+            },
+            "description": {
+              "type": "string",
+              "minLength": 1
+            },
+            "evidence": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "options": {
+              "type": "array",
+              "minItems": 2,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "value",
+                  "label",
+                  "consequence"
+                ],
+                "properties": {
+                  "value": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "label": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "consequence": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            },
+            "recommendation": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  },
   "interview.schema.json": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "title": "Requirements Interview v1",

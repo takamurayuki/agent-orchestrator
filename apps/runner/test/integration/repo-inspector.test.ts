@@ -53,6 +53,20 @@ describe('RepoInspector (RA-01 / RA-13 / RA-14 / SEC-09)', () => {
     expect(r.facts.every((f) => f.source.length > 0)).toBe(true);
   });
 
+  it('v2.1: lint rules and TypeScript strictness are extracted as facts for contradiction detection', async () => {
+    writeFileSync(join(repo, 'eslint.config.js'), "import js from '@eslint/js';\nexport default [js.configs.recommended, { rules: { 'no-console': 'error', 'no-restricted-syntax': ['error', { selector: 'TemplateLiteral', message: 'テンプレートリテラルは使わない' }], 'eqeqeq': 'off' }, ignores: ['dist/**'] }];\n");
+    writeFileSync(join(repo, 'tsconfig.json'), '{ "compilerOptions": { "strict": true, "noUnusedLocals": true } }');
+    const r = await inspector().inspect(repo);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const byKey = Object.fromEntries(r.facts.map((f) => [f.key, f]));
+    expect(byKey['lint.rules.error']).toMatchObject({ source: 'eslint.config.js', confidence: 'confirmed' });
+    expect(byKey['lint.rules.error']?.value).toContain('no-restricted-syntax');
+    expect(byKey['lint.restrictions']?.value).toContain('テンプレートリテラルは使わない');
+    expect(byKey['lint.rules.off']?.value).toContain('eqeqeq');
+    expect(byKey['typescript.strictness']?.value).toContain('strict');
+  });
+
   it('RA-02: unknowns are reported as unknown, not as facts', async () => {
     rmSync(join(repo, 'src', 'auth'), { recursive: true });
     writeFileSync(join(repo, 'package.json'), JSON.stringify({ name: 'demo', scripts: {}, dependencies: { svelte: '^5' } }));

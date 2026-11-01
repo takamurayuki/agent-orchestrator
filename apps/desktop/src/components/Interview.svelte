@@ -146,6 +146,14 @@
           <h2 id="understanding-heading">現在の要件理解</h2>
           <p class="small muted">回答のたびに再評価されます。確定事項・選択・推奨・未確定は分けて記録します。</p>
           <pre data-testid="draft-summary">{draft.summary}</pre>
+          {#if draft.decisions.length > 0}
+            <h3>意思決定ログ（矛盾の解消）</h3>
+            <ul class="small" data-testid="decision-log">
+              {#each draft.decisions as d (d.contradictionId)}
+                <li><strong>{d.contradictionId}</strong>: {d.question} → <strong>{d.chosenLabel}</strong>（{d.consequence}）</li>
+              {/each}
+            </ul>
+          {/if}
         </section>
 
         <SummaryEditor {draft} disabled={app.busy !== null || draft.approved} onRevise={reviseDraft} onDirtyChange={(d) => (summaryDirty = d)} />

@@ -11,7 +11,8 @@ export const SCHEMA_FILES = {
   review: 'review.schema.json',
   interview: 'interview.schema.json',
   ipc: 'ipc.schema.json',
-  taskProposal: 'task-proposal.schema.json'
+  taskProposal: 'task-proposal.schema.json',
+  contradiction: 'contradiction.schema.json'
 } as const;
 export type SchemaName = keyof typeof SCHEMA_FILES;
 

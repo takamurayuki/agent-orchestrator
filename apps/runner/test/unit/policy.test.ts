@@ -28,28 +28,7 @@ describe('forbidden CLI flags [SEC-08]', () => {
   });
 });
 
-describe('diff policy', () => {
-  it('fails when a test file is deleted', () => {
-    const v = checkDiffPolicy({ files: [{ path: 'src/auth/login.test.ts', status: 'deleted', additions: 0, deletions: 40 }] });
-    expect(v.map((x) => x.code)).toContain('TEST_FILE_DELETED');
-  });
-
-  it('fails when tests are skipped', () => {
-    const v = checkDiffPolicy({
-      files: [{ path: 'tests/login.spec.ts', status: 'modified', additions: 1, deletions: 1 }],
-      patches: { 'tests/login.spec.ts': "-  it('rejects bad password', () => {\n+  it.skip('rejects bad password', () => {" }
-    });
-    expect(v.map((x) => x.code)).toContain('TEST_SKIPPED');
-  });
-
-  it('fails when verification scripts are removed from package.json', () => {
-    const v = checkDiffPolicy({
-      files: [{ path: 'package.json', status: 'modified', additions: 0, deletions: 1 }],
-      patches: { 'package.json': '-    "test:run": "vitest run",\n' }
-    });
-    expect(v.map((x) => x.code)).toContain('VERIFICATION_CONFIG_WEAKENED');
-  });
-
+describe('diff policy (security checks; quality checks live in policy-gate.test.ts since v2.1)', () => {
   it('fails on forbidden paths and path escapes [SEC-04][SEC-09]', () => {
     const v = checkDiffPolicy({
       files: [

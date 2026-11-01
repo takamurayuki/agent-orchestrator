@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { DraftViewSchema } from './draft.js';
-import { RunEventSchema, RunStatusSchema } from './run.js';
+import { PolicyFindingSchema, RunEventSchema, RunStatusSchema } from './run.js';
 import { AcceptanceCriterionSchema } from './task.js';
 
 /** MVP で許可する IPC method（contracts/ipc.schema.json と同一の allowlist）。 */
@@ -206,7 +206,9 @@ export const RunReportResultSchema = z.strictObject({
   reportPath: z.string(),
   worktreePath: z.string().nullable(),
   /** egress プロキシのログ集計（ホスト名のみ。認証情報・URL パスは含まない）。ログが無い Run では available=false */
-  egress: EgressSummarySchema
+  egress: EgressSummarySchema,
+  /** 最終ラウンドの Policy Gate 検出（v2.1）。未承認 blocking があれば COMPLETED にならない */
+  policyFindings: z.array(PolicyFindingSchema)
 });
 export type RunReportResult = z.infer<typeof RunReportResultSchema>;
 
