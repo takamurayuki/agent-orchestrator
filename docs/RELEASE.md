@@ -51,5 +51,5 @@ NSIS インストーラは `externalBin` のサイドカーを `agent-orchestrat
 - 署名鍵が無い間は、ビルドした配布物を **「未署名リリース候補（RC）」** として扱い、一般公開版とは区別する（配布先は社内検証に限定、ファイル名や配布ページに「未署名 RC」と明記）。
 - RC の検証手順と結果は `docs/RC_VERIFICATION.md` に記録する（インストーラの SHA-256、インストール / 起動 / 初回環境チェック / GUI 全フロー / 停止 / 再起動後の履歴 / アンインストール）。
 - 検証ジョブは順次実行する: `CI=1 RUN_DOCKER_TESTS=1 pnpm vitest run` → `pnpm test:e2e`（Playwright）→ LIVE。Docker テストと Playwright を同時に走らせると WebServer（vite）がメモリ不足で落ちることがある。
-- サンドボックスイメージは配布物に含まれない。利用者側で `pnpm sandbox:build`（リポジトリが必要）。
-- 一般公開版に進む条件: コード署名（§3）、サンドボックスイメージの配布方法の決定、クリーン環境（別 PC / VM）での検証。
+- サンドボックスイメージは配布物に含まれないが、初回起動時にアプリの「サンドボックスを準備する」から取得・ビルド・検証できる（`docker/manifest.json` のピン留め）。ベースイメージを更新するときは manifest の `baseDigest` を更新し、`pnpm sandbox:build --force` と `node scripts/gen-sandbox-assets.mjs`（runner の build に含まれる）で埋め込みを更新する。
+- 一般公開版に進む条件: コード署名（§3）、クリーン環境（別 PC / VM）での検証。

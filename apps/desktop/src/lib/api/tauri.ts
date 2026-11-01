@@ -15,7 +15,10 @@ const COMMANDS: Record<IpcMethod, string> = {
   'run.cancel': 'run_cancel',
   'run.status': 'run_status',
   'run.list': 'run_list',
-  'run.report': 'run_report'
+  'run.report': 'run_report',
+  'sandbox.setup': 'sandbox_setup',
+  'sandbox.cancel': 'sandbox_cancel',
+  'sandbox.status': 'sandbox_status'
 };
 
 export const RUNNER_EVENT = 'runner://event';
@@ -23,6 +26,15 @@ export const RUNNER_EVENT = 'runner://event';
 export class TauriTransport implements Transport {
   readonly kind = 'tauri' as const;
   readonly hasFolderPicker = true;
+  readonly canRevealWorktree = true;
+
+  async revealWorktree(path: string): Promise<void> {
+    try {
+      await invoke('reveal_worktree', { path });
+    } catch (e) {
+      throw toIpcCallError(e);
+    }
+  }
 
   async call<M extends IpcMethod>(method: M, params: IpcParams[M]): Promise<IpcResults[M]> {
     const command = COMMANDS[method];

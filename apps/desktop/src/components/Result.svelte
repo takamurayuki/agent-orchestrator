@@ -3,12 +3,14 @@
   import { REASON_CODE_LABELS, RUN_STATE_TONES, formatDateTime, isTerminalRunState, runStateLabel } from '../lib/labels';
   import { SEVERITY_LABELS, describeOutcome, severityImpact, severityTone } from '../lib/outcome';
   import { app } from '../lib/stores/app.svelte';
-  import { loadHistory, openRunReport, resumeRun } from '../lib/stores/actions';
+  import { loadHistory, openRunReport, resumeRun, revealWorktree } from '../lib/stores/actions';
+  import { getTransport } from '../lib/api';
   import Alert from '../lib/components/Alert.svelte';
   import HistoryList from '../lib/components/HistoryList.svelte';
   import StatusBadge from '../lib/components/StatusBadge.svelte';
 
   const report = $derived(app.report);
+  const canReveal = getTransport().canRevealWorktree;
   const outcome = $derived(report ? describeOutcome(report.run, report) : null);
 
   let diffOpen = $state(false);
@@ -111,6 +113,9 @@
           <div class="row actions" data-testid="result-actions">
             {#if report.changedFiles.length > 0}
               <button type="button" class="primary" onclick={showChanges} data-testid="show-diff">変更内容を見る（{report.changedFiles.length} ファイル）</button>
+            {/if}
+            {#if report.worktreePath && canReveal}
+              <button type="button" onclick={() => void revealWorktree(report.worktreePath!)} data-testid="open-worktree">作業用コピーのフォルダーを開く</button>
             {/if}
             {#if report.worktreePath}
               <button type="button" onclick={() => void copyText('作業用コピーのパス', report.worktreePath)} data-testid="copy-worktree">作業用コピーのパスをコピー</button>

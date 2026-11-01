@@ -1,4 +1,4 @@
-import type { Answer, DraftView, IpcEvent, RunEvent, RunReportResult, RunStatus, TaskProposal } from '@agent-orchestrator/contracts';
+import type { Answer, DraftView, IpcEvent, RunEvent, RunReportResult, RunStatus, SandboxSetupState, TaskProposal } from '@agent-orchestrator/contracts';
 import {
   CHANGED_FILES,
   DIFF_EXCERPT,
@@ -23,18 +23,48 @@ import { IpcCallError, type IpcMethod, type IpcParams, type IpcResults, type Run
  * - `mockLatency=<ms>` simulated IPC latency per call (default 60)
  * - `mockRun=needs_human|precheck_failed|completed` which run scenario `run.start` plays (default completed)
  * - `mockFresh=1`   ignore runs persisted in sessionStorage (terminal runs are persisted so a reload keeps history)
+ * - `env=noimages`   environment.check reports the sandbox images as missing until the GUI setup succeeds
+ * - `setup=ok|fail|fail-once|slow|build-fail` how the simulated sandbox setup behaves (default ok)
  */
+const SANDBOX_MANIFEST_MOCK: SandboxSetupState['manifest'] = {
+  version: '0.1.0',
+  baseImage: 'node:22.23.4-bookworm-slim',
+  baseDigest: 'sha256:4b150b48b4116e2a22f2c39cc27025fbf4f153e2078fd3b14d159fdb5c7279da',
+  images: [
+    { id: 'proxy', tag: 'agent-orchestrator-egress-proxy:0.1.0', label: 'egress プロキシイメージ' },
+    { id: 'sandbox', tag: 'agent-orchestrator-sandbox:0.1.0', label: 'サンドボックスイメージ' }
+  ]
+};
+const SETUP_STEPS: Array<{ id: string; label: string }> = [
+  { id: 'docker', label: 'Docker デーモンの確認' },
+  { id: 'base.pull', label: 'ベースイメージの取得（Docker Hub、ピン留め）' },
+  { id: 'base.verify', label: 'ベースイメージのダイジェスト検証' },
+  { id: 'build.proxy', label: 'egress プロキシイメージのビルド' },
+  { id: 'build.sandbox', label: 'サンドボックスイメージのビルド' },
+  { id: 'verify', label: 'ビルド結果の整合性検証' }
+];
 const STORAGE_KEY = 'agent-orchestrator-mock-runs';
 type RunScenario = 'completed' | 'needs_human' | 'precheck_failed';
 export class MockTransport implements Transport {
   readonly kind = 'mock' as const;
   readonly hasFolderPicker = false;
+  readonly canRevealWorktree = false;
+
+  async revealWorktree(): Promise<void> {
+    this.fail('ENVIRONMENT_UNAVAILABLE', 'ブラウザ開発モードではフォルダーを開けません');
+  }
 
   private readonly envFail: boolean;
   private readonly stepDelay: number;
   private readonly latency: number;
   private readonly scenario: RunScenario;
   private readonly persist: boolean;
+  private readonly noImages: boolean;
+  private readonly setupMode: string;
+  private setupDone = false;
+  private setupAttempts = 0;
+  private setupTimer: ReturnType<typeof setTimeout> | null = null;
+  private setup: SandboxSetupState = idleSetup();
   private readonly listeners = new Set<(e: IpcEvent) => void>();
   private readonly drafts = new Map<string, DraftView>();
   private readonly runs = new Map<string, { run: RunStatus; events: RunEvent[]; report: RunReportResult | null; timer: ReturnType<typeof setTimeout> | null }>();
@@ -48,6 +78,8 @@ export class MockTransport implements Transport {
     const scenario = query.get('mockRun');
     this.scenario = scenario === 'needs_human' || scenario === 'precheck_failed' ? scenario : 'completed';
     this.persist = query.get('mockFresh') !== '1';
+    this.noImages = query.get('env') === 'noimages';
+    this.setupMode = query.get('setup') ?? 'ok';
     for (const { run, report } of seedHistory()) {
       this.runs.set(run.runId, { run, events: [], report, timer: null });
     }
@@ -98,7 +130,66 @@ export class MockTransport implements Transport {
   }
 
   private readonly handlers: { [M in IpcMethod]: (params: IpcParams[M]) => IpcResults[M] } = {
-    'environment.check': () => environmentReport(this.envFail),
+    'environment.check': () => environmentReport(this.envFail, this.noImages && !this.setupDone),
+
+    'sandbox.status': () => structuredClone(this.setup),
+
+    'sandbox.setup': ({ acknowledgePull }) => {
+      if (acknowledgePull !== true) this.fail('INVALID_PARAMS', 'ベースイメージの取得への同意（acknowledgePull）が必要です');
+      if (this.setup.state === 'running') this.fail('INVALID_STATE', 'サンドボックスの準備は既に実行中です');
+      this.setupAttempts += 1;
+      this.setup = { ...idleSetup(), state: 'running', startedAt: new Date().toISOString() };
+      this.emitSetup();
+      const slow = this.setupMode === 'slow';
+      const failAt = this.setupMode === 'fail' || (this.setupMode === 'fail-once' && this.setupAttempts === 1) ? 'verify' : this.setupMode === 'build-fail' ? 'build.sandbox' : null;
+      let i = 0;
+      const tick = () => {
+        if (this.setup.state !== 'running') return;
+        const step = SETUP_STEPS[i];
+        if (!step) {
+          this.setup = { ...this.setup, state: 'succeeded', finishedAt: new Date().toISOString() };
+          this.setupDone = true;
+          this.setupTimer = null;
+          this.emitSetup();
+          return;
+        }
+        this.setStep(step.id, 'running', step.id === 'base.pull' ? `${SANDBOX_MANIFEST_MOCK.baseImage}@${SANDBOX_MANIFEST_MOCK.baseDigest}` : '');
+        this.setup.logTail = [...this.setup.logTail, `[mock] ${step.label} …`].slice(-40);
+        this.emitSetup();
+        this.setupTimer = setTimeout(() => {
+          if (this.setup.state !== 'running') return;
+          if (failAt === step.id) {
+            const verifyFail = step.id === 'verify';
+            this.setStep(step.id, 'fail', verifyFail ? 'agent-orchestrator-sandbox:0.1.0 の整合性検証に失敗しました（version=0.0.9）。イメージは削除しました' : 'npm ERR! network request to https://registry.npmjs.org/ failed');
+            this.setup = {
+              ...this.setup,
+              state: 'failed',
+              finishedAt: new Date().toISOString(),
+              error: verifyFail
+                ? { code: 'IMAGE_VERIFY_FAILED', message: 'agent-orchestrator-sandbox:0.1.0 の整合性検証に失敗しました（version=0.0.9）。イメージは削除しました', fix: '「再試行」で作り直してください。繰り返す場合は開発者に連絡してください' }
+                : { code: 'BUILD_FAILED', message: 'agent-orchestrator-sandbox:0.1.0 のビルドが失敗しました: npm ERR! network request to https://registry.npmjs.org/ failed', fix: 'ネットワーク（npm レジストリへの到達）とディスク空き容量を確認し、「再試行」を押してください。繰り返す場合はログを添えて開発者に連絡してください' }
+            };
+            this.setupTimer = null;
+            this.emitSetup();
+            return;
+          }
+          this.setStep(step.id, 'ok', step.id === 'verify' ? 'version 0.1.0 / base sha256:4b150b48b4116e2' : '');
+          i += 1;
+          tick();
+        }, slow ? 1500 : Math.max(60, Math.floor(this.stepDelay / 4)));
+      };
+      tick();
+      return structuredClone(this.setup);
+    },
+
+    'sandbox.cancel': () => {
+      if (this.setup.state !== 'running') this.fail('INVALID_STATE', '実行中のサンドボックス準備はありません');
+      if (this.setupTimer) clearTimeout(this.setupTimer);
+      this.setupTimer = null;
+      this.setup = { ...this.setup, state: 'cancelled', finishedAt: new Date().toISOString(), steps: this.setup.steps.map((s) => (s.status === 'running' ? { ...s, status: 'skipped', detail: 'キャンセル' } : s)) };
+      this.emitSetup();
+      return structuredClone(this.setup);
+    },
 
     'project.inspect': ({ path }) => {
       if (!path || !path.trim()) this.fail('INVALID_PARAMS', 'path は空にできません');
@@ -394,6 +485,14 @@ export class MockTransport implements Transport {
     }
   };
 
+  private setStep(id: string, status: SandboxSetupState['steps'][number]['status'], detail: string): void {
+    this.setup = { ...this.setup, steps: this.setup.steps.map((s) => (s.id === id ? { ...s, status, detail } : s)) };
+  }
+
+  private emitSetup(): void {
+    this.emit({ event: 'sandbox.progress', payload: structuredClone(this.setup) as unknown as Record<string, unknown> });
+  }
+
   private pushEvent(runId: string, type: string, payload: Record<string, unknown>, round: number | null = null): void {
     const entry = this.runs.get(runId);
     if (!entry) return;
@@ -566,6 +665,10 @@ export class MockTransport implements Transport {
       }
     ];
   }
+}
+
+function idleSetup(): SandboxSetupState {
+  return { state: 'idle', startedAt: null, finishedAt: null, steps: SETUP_STEPS.map((s) => ({ ...s, status: 'pending', detail: '' })), logTail: [], error: null, manifest: SANDBOX_MANIFEST_MOCK };
 }
 
 function blockingUnanswered(draft: DraftView): string[] {

@@ -2,7 +2,7 @@
   import { getTransport } from '../lib/api';
   import { PROJECT_STATUS_LABELS } from '../lib/labels';
   import { app } from '../lib/stores/app.svelte';
-  import { checkEnvironment, createDraft, inspectProject, pickFolder, resumeRun, showResult } from '../lib/stores/actions';
+  import { cancelSandboxSetup, checkEnvironment, createDraft, inspectProject, pickFolder, resumeRun, showResult, startSandboxSetup } from '../lib/stores/actions';
   import { isTerminalRunState } from '../lib/labels';
   import Alert from '../lib/components/Alert.svelte';
   import HistoryList from '../lib/components/HistoryList.svelte';
@@ -32,7 +32,9 @@
   <h1>依頼を作成</h1>
 
   {#if app.environment && !app.environment.canRun}
-    <SetupCheck report={app.environment} error={app.environmentError} busy={app.busy !== null} onRecheck={() => void checkEnvironment()} />
+    <SetupCheck report={app.environment} error={app.environmentError} busy={app.busy !== null} onRecheck={() => void checkEnvironment()} setup={app.sandboxSetup} onSandboxStart={() => void startSandboxSetup()} onSandboxCancel={() => void cancelSandboxSetup()} />
+  {:else if app.sandboxSetup?.state === 'succeeded' && app.environment?.canRun}
+    <Alert tone="success" role="status" title="サンドボックスの準備が完了しました" message="実行環境が整いました。プロジェクトを選んで依頼を入力してください。" testid="sandbox-success" />
   {:else if app.environmentError}
     <SetupCheck report={null} error={app.environmentError} busy={app.busy !== null} onRecheck={() => void checkEnvironment()} />
   {/if}

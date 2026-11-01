@@ -11,7 +11,7 @@ import type {
 
 export const MOCK_PROJECT_PATH = 'C:\\Users\\dev\\projects\\web-app';
 
-export function environmentReport(fail: boolean): EnvironmentReport {
+export function environmentReport(fail: boolean, noImages = false): EnvironmentReport {
   const now = new Date().toISOString();
   const checks: EnvironmentReport['checks'] = [
     {
@@ -36,6 +36,20 @@ export function environmentReport(fail: boolean): EnvironmentReport {
           detail: 'Docker 27.3.1、WSL2 バックエンド、実行イメージ agent-orchestrator/sandbox:node22 を検出',
           fix: null
         },
+    ...(fail
+      ? [
+          { id: 'docker.image.sandbox', label: 'サンドボックスイメージ', status: 'skipped' as const, detail: 'Docker が利用できないため未確認', fix: null },
+          { id: 'docker.image.proxy', label: 'egress プロキシイメージ', status: 'skipped' as const, detail: 'Docker が利用できないため未確認', fix: null }
+        ]
+      : noImages
+        ? [
+            { id: 'docker.image.sandbox', label: 'サンドボックスイメージ', status: 'fail' as const, detail: 'agent-orchestrator-sandbox:0.1.0 が見つかりません', fix: 'ホーム画面の「サンドボックスを準備する」から取得・ビルドしてください（開発環境では pnpm sandbox:build）' },
+            { id: 'docker.image.proxy', label: 'egress プロキシイメージ', status: 'fail' as const, detail: 'agent-orchestrator-egress-proxy:0.1.0 が見つかりません', fix: 'ホーム画面の「サンドボックスを準備する」から取得・ビルドしてください（開発環境では pnpm sandbox:build）' }
+          ]
+        : [
+            { id: 'docker.image.sandbox', label: 'サンドボックスイメージ', status: 'ok' as const, detail: 'agent-orchestrator-sandbox:0.1.0 (sha256:0ce930df28c2) 検証済み: version 0.1.0, base sha256:4b150b48b4116e2', fix: null },
+            { id: 'docker.image.proxy', label: 'egress プロキシイメージ', status: 'ok' as const, detail: 'agent-orchestrator-egress-proxy:0.1.0 (sha256:015e9a09d884) 検証済み: version 0.1.0, base sha256:4b150b48b4116e2', fix: null }
+          ]),
     fail
       ? {
           id: 'egress',
@@ -83,7 +97,7 @@ export function environmentReport(fail: boolean): EnvironmentReport {
   return {
     platform: 'win32',
     executionMode: fail ? 'unavailable' : 'docker-wsl',
-    canRun: !fail,
+    canRun: !fail && !noImages,
     checks,
     checkedAt: now
   };

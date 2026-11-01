@@ -7,6 +7,7 @@ import { CODEX_REQUIRED_FLAGS } from './agents/codex.js';
 import type { RunnerConfig } from './config.js';
 import { runProcess, type ProcessRunner } from './process-runner.js';
 import { CONTAINER_AUX, CONTAINER_WORKSPACE, PROXY_ALIAS, PROXY_PORT } from './isolation/types.js';
+import { SANDBOX_MANIFEST } from './sandbox/assets.generated.js';
 
 /**
  * EnvironmentAdapter（SPEC §2 クロス OS）。Tauri/Rust ↔ Node ↔ Docker(WSL2) の引き渡しとパス変換をここに閉じ込める。
@@ -103,12 +104,20 @@ export class LocalEnvironmentAdapter implements EnvironmentAdapter {
       if (this.mode === 'docker-desktop-windows') {
         add({ id: 'wsl', label: 'WSL2', status: ok && /docker desktop/i.test(os ?? '') ? 'ok' : 'warn', detail: ok ? `Docker Desktop（WSL2 バックエンド）: ${os}` : 'Docker Desktop の状態を確認できません', fix: ok ? null : 'wsl --status で WSL2 が有効か確認してください' });
       }
-      for (const [id, label, image, fix] of [
-        ['docker.image.sandbox', 'サンドボックスイメージ', this.options.config.sandboxImage, 'pnpm sandbox:build を実行してイメージをビルドしてください'],
-        ['docker.image.proxy', 'egress プロキシイメージ', this.options.config.egressProxyImage, 'pnpm sandbox:build を実行してイメージをビルドしてください']
+      // サンドボックスイメージ: 存在だけでなく、マニフェスト（version / ベースイメージのダイジェスト）と一致することを検証する（v0.1.0 公開準備）
+      const setupFix = 'ホーム画面の「サンドボックスを準備する」から取得・ビルドしてください（開発環境では pnpm sandbox:build）';
+      for (const [id, label, image] of [
+        ['docker.image.sandbox', 'サンドボックスイメージ', this.options.config.sandboxImage],
+        ['docker.image.proxy', 'egress プロキシイメージ', this.options.config.egressProxyImage]
       ] as const) {
-        const r = await this.run({ command: 'docker', args: ['image', 'inspect', '--format', '{{.Id}}', image], inheritEnv: true, timeoutMs: 30_000 });
-        add({ id, label, status: r.exitCode === 0 ? 'ok' : 'fail', detail: r.exitCode === 0 ? `${image} (${r.stdout.trim().slice(0, 19)})` : `${image} が見つかりません`, fix: r.exitCode === 0 ? null : fix });
+        const r = await this.run({ command: 'docker', args: ['image', 'inspect', '--format', `{{.Id}}|{{index .Config.Labels "${SANDBOX_MANIFEST.labels.version}"}}|{{index .Config.Labels "${SANDBOX_MANIFEST.labels.baseDigest}"}}`, image], inheritEnv: true, timeoutMs: 30_000 });
+        if (r.exitCode !== 0) {
+          add({ id, label, status: 'fail', detail: `${image} が見つかりません`, fix: setupFix });
+          continue;
+        }
+        const [imageId, version, baseDigest] = r.stdout.trim().split('|');
+        const verified = version === SANDBOX_MANIFEST.version && baseDigest === SANDBOX_MANIFEST.baseDigest;
+        add({ id, label, status: verified ? 'ok' : 'fail', detail: verified ? `${image} (${(imageId ?? '').slice(0, 19)}) 検証済み: version ${version}, base ${(baseDigest ?? '').slice(0, 19)}` : `${image} はマニフェストと一致しません（version=${version || '（なし）'}, base=${(baseDigest || '（なし）').slice(0, 19)}）。使用しません`, fix: verified ? null : `${setupFix}。既存のイメージは作り直されます` });
       }
     }
 

@@ -1,5 +1,6 @@
 <script lang="ts">
-  import type { EnvironmentReport } from '@agent-orchestrator/contracts';
+  import type { EnvironmentReport, SandboxSetupState } from '@agent-orchestrator/contracts';
+  import SandboxSetup from './SandboxSetup.svelte';
   import { ENV_STATUS_LABELS, ENV_STATUS_TONES, formatDateTime } from '../labels';
   import type { UiError } from '../stores/app.svelte';
   import StatusBadge from './StatusBadge.svelte';
@@ -10,9 +11,14 @@
     error: UiError | null;
     busy: boolean;
     onRecheck: () => void;
+    setup?: SandboxSetupState | null;
+    onSandboxStart?: () => void;
+    onSandboxCancel?: () => void;
   }
 
-  let { report, error, busy, onRecheck }: Props = $props();
+  let { report, error, busy, onRecheck, setup = null, onSandboxStart, onSandboxCancel }: Props = $props();
+  const imagesMissing = $derived(report ? report.checks.some((c) => c.id.startsWith('docker.image.') && c.status === 'fail') : false);
+  const dockerFailing = $derived(report ? report.checks.some((c) => (c.id === 'docker' || c.id === 'docker.cli' || c.id === 'docker.daemon') && c.status === 'fail') : false);
 
   const modeLabels: Record<string, string> = {
     'docker-desktop-windows': 'Docker Desktop (Windows コンテナ)',
@@ -49,6 +55,9 @@
       <Alert tone="warning" role="status" title="実行環境が整っていないため、依頼の開始はできません">
         <p class="small">プロジェクトの確認や過去の履歴の閲覧はできます。以下の修正方法に従って環境を整えてから「再チェック」を押してください。</p>
       </Alert>
+    {/if}
+    {#if (imagesMissing && !dockerFailing) || (setup && setup.state !== 'idle')}
+      <SandboxSetup {setup} {busy} onStart={() => onSandboxStart?.()} onCancel={() => onSandboxCancel?.()} />
     {/if}
     <ul class="checks" aria-label="環境チェック項目">
       {#each report.checks as check (check.id)}

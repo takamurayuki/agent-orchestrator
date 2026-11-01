@@ -8,8 +8,8 @@
     "agent-orchestrator-runner": "./dist/main.js"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "node ../../scripts/gen-sandbox-assets.mjs && tsc -p tsconfig.json",
+    "typecheck": "node ../../scripts/gen-sandbox-assets.mjs && tsc -p tsconfig.json --noEmit",
     "start": "node dist/main.js",
     "dev": "tsx src/main.ts"
   },

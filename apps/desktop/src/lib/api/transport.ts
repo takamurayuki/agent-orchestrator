@@ -8,7 +8,8 @@ import type {
   RunReportResult,
   RunStatus,
   RunStatusResult,
-  AcceptanceCriterion
+  AcceptanceCriterion,
+  SandboxSetupState
 } from '@agent-orchestrator/contracts';
 
 /** Params per IPC method (mirrors packages/contracts/src/ipc.ts; types only). */
@@ -37,6 +38,9 @@ export interface IpcParams {
   'run.status': { runId: string; sinceSequence?: number };
   'run.list': { limit?: number };
   'run.report': { runId: string };
+  'sandbox.setup': { acknowledgePull: true };
+  'sandbox.cancel': Record<string, never>;
+  'sandbox.status': Record<string, never>;
 }
 
 export interface IpcResults {
@@ -51,6 +55,9 @@ export interface IpcResults {
   'run.status': RunStatusResult;
   'run.list': { runs: RunStatus[] };
   'run.report': RunReportResult;
+  'sandbox.setup': SandboxSetupState;
+  'sandbox.cancel': SandboxSetupState;
+  'sandbox.status': SandboxSetupState;
 }
 
 export type { IpcMethod };
@@ -101,6 +108,9 @@ export interface Transport {
   readonly kind: 'tauri' | 'mock';
   /** Whether a native folder picker is available. */
   readonly hasFolderPicker: boolean;
+  /** 作業用コピーのフォルダーを OS のファイルマネージャーで開けるか（Tauri のみ。worktrees 配下に限定） */
+  readonly canRevealWorktree: boolean;
+  revealWorktree(path: string): Promise<void>;
   call<M extends IpcMethod>(method: M, params: IpcParams[M]): Promise<IpcResults[M]>;
   /** Subscribe to runner events (`run.event`, `run.updated`, `draft.updated`, `runner.ready`). Returns unsubscribe. */
   onEvent(cb: (event: IpcEvent) => void): () => void;

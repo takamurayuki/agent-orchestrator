@@ -12,6 +12,9 @@ import {
   RunCancelParams,
   RunListParams,
   RunReportParams,
+  SandboxCancelParams,
+  SandboxSetupParams,
+  SandboxStatusParams,
   RunStartParams,
   RunStatusParams,
   type IpcErrorCode,
@@ -54,7 +57,10 @@ const PARAM_SCHEMAS: Record<IpcMethod, ZodType> = {
   'run.cancel': RunCancelParams,
   'run.status': RunStatusParams,
   'run.list': RunListParams,
-  'run.report': RunReportParams
+  'run.report': RunReportParams,
+  'sandbox.setup': SandboxSetupParams,
+  'sandbox.cancel': SandboxCancelParams,
+  'sandbox.status': SandboxStatusParams
 };
 
 export class IpcServer {

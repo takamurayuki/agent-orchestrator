@@ -41,6 +41,9 @@ pub const ALLOWED_METHODS: &[&str] = &[
     "run.status",
     "run.list",
     "run.report",
+    "sandbox.setup",
+    "sandbox.cancel",
+    "sandbox.status",
 ];
 
 /// Tauri event name used to forward every runner event to the webview.

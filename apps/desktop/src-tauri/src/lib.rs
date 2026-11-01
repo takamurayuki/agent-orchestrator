@@ -36,6 +36,10 @@ pub fn run() {
             commands::run_status,
             commands::run_list,
             commands::run_report,
+            commands::sandbox_setup,
+            commands::sandbox_cancel,
+            commands::sandbox_status,
+            commands::reveal_worktree,
             commands::pick_project_folder,
             commands::runner_state,
         ])

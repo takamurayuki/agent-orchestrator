@@ -15,7 +15,10 @@ export const IPC_METHODS = [
   'run.cancel',
   'run.status',
   'run.list',
-  'run.report'
+  'run.report',
+  'sandbox.setup',
+  'sandbox.cancel',
+  'sandbox.status'
 ] as const;
 export type IpcMethod = (typeof IPC_METHODS)[number];
 
@@ -212,6 +215,42 @@ export const RunReportResultSchema = z.strictObject({
 });
 export type RunReportResult = z.infer<typeof RunReportResultSchema>;
 
+// ---- サンドボックス準備（v0.1.0 公開準備）: GUI から固定手順でイメージを取得・ビルド・検証する ----
+
+export const SandboxSetupParams = z.strictObject({
+  /** Docker Hub からピン留めしたベースイメージを取得することへの明示的な同意（これ無しでは外部取得しない） */
+  acknowledgePull: z.literal(true)
+});
+export const SandboxCancelParams = z.strictObject({});
+export const SandboxStatusParams = z.strictObject({});
+
+export const SANDBOX_SETUP_STATES = ['idle', 'running', 'succeeded', 'failed', 'cancelled'] as const;
+export const SandboxSetupStepSchema = z.strictObject({
+  id: z.string(),
+  label: z.string(),
+  status: z.enum(['pending', 'running', 'ok', 'fail', 'skipped']),
+  detail: z.string()
+});
+export type SandboxSetupStep = z.infer<typeof SandboxSetupStepSchema>;
+export const SandboxManifestSchema = z.strictObject({
+  version: z.string(),
+  baseImage: z.string(),
+  baseDigest: z.string(),
+  images: z.array(z.strictObject({ id: z.string(), tag: z.string(), label: z.string() }))
+});
+export type SandboxManifest = z.infer<typeof SandboxManifestSchema>;
+export const SandboxSetupStateSchema = z.strictObject({
+  state: z.enum(SANDBOX_SETUP_STATES),
+  startedAt: z.string().nullable(),
+  finishedAt: z.string().nullable(),
+  steps: z.array(SandboxSetupStepSchema),
+  /** docker 出力の末尾（マスキング済み、最大 40 行） */
+  logTail: z.array(z.string()),
+  error: z.strictObject({ code: z.string(), message: z.string(), fix: z.string() }).nullable(),
+  manifest: SandboxManifestSchema
+});
+export type SandboxSetupState = z.infer<typeof SandboxSetupStateSchema>;
+
 /** Runner → UI のイベント名。 */
-export const IPC_EVENTS = ['runner.ready', 'draft.updated', 'run.event', 'run.updated'] as const;
+export const IPC_EVENTS = ['runner.ready', 'draft.updated', 'run.event', 'run.updated', 'sandbox.progress'] as const;
 export type IpcEventName = (typeof IPC_EVENTS)[number];

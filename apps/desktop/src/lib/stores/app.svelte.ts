@@ -5,7 +5,8 @@ import type {
   ProjectInfo,
   RunEvent,
   RunReportResult,
-  RunStatus
+  RunStatus,
+  SandboxSetupState
 } from '@agent-orchestrator/contracts';
 
 export type Screen = 'home' | 'interview' | 'running' | 'result';
@@ -28,6 +29,8 @@ class AppStore {
 
   environment = $state<EnvironmentReport | null>(null);
   environmentError = $state<UiError | null>(null);
+  /** サンドボックス準備（GUI からのイメージ取得・ビルド）の進捗 */
+  sandboxSetup = $state<SandboxSetupState | null>(null);
 
   projectPath = $state('');
   project = $state<ProjectInfo | null>(null);

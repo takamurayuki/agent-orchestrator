@@ -5,6 +5,7 @@ import { chromium, expect, test, type Page } from '@playwright/test';
  *   LIVE_RC_PHASE=error   : 無効フォルダーのエラー表示（原因・修正案）と開始不可
  *   LIVE_RC_PHASE=cancel  : ヒアリング → 承認 → 実行開始 → GUI から停止 → 結果画面で「途中で止まりました」
  *   LIVE_RC_PHASE=restart : アプリ再起動後（別プロセス）に履歴が復元され、停止した Run の結果を開ける
+ *   LIVE_RC_PHASE=setup   : サンドボックスイメージが無い状態から GUI だけで準備（同意 → 取得 → 検証 → ビルド）し、実行可能になる
  * 環境変数: LIVE_CDP_URL, LIVE_SAMPLE_REPO
  */
 const CDP = process.env.LIVE_CDP_URL ?? 'http://127.0.0.1:9333';
@@ -32,6 +33,31 @@ async function answerCurrentRound(page: Page): Promise<void> {
 }
 
 test.describe('RC: packaged app (GUI error / stop / restart)', () => {
+  test('RC-setup: first run with no sandbox images → GUI setup (consent → pull → verify → build) → runnable', async () => {
+    test.skip(phase !== 'setup', 'LIVE_RC_PHASE=setup のときだけ');
+    const page = await connect();
+    await expect(page.getByTestId('screen-home')).toBeVisible({ timeout: 60_000 });
+    const env = page.getByTestId('env-status');
+    await expect(env).toBeVisible({ timeout: 180_000 });
+    await expect(env).toContainText('実行不可');
+    const missing = page.locator('[data-testid="env-check"][data-status="fail"]');
+    await expect(missing).toHaveCount(2);
+    await expect(missing.first()).toContainText('サンドボックスを準備する');
+    const setup = page.getByTestId('sandbox-setup');
+    await expect(setup).toBeVisible();
+    await expect(page.getByTestId('sandbox-start')).toBeDisabled();
+    await page.getByTestId('sandbox-consent').check();
+    await page.getByTestId('sandbox-start').click();
+    await expect(setup).toHaveAttribute('data-state', 'running', { timeout: 30_000 });
+    const t0 = Date.now();
+    // 取得 + 2 イメージのビルド（最大 30 分）。成功するとパネルが消え完了メッセージが出る
+    await expect(page.getByTestId('sandbox-success')).toBeVisible({ timeout: 30 * 60 * 1000 });
+    console.log(`[rc] sandbox setup via GUI succeeded in ${Math.round((Date.now() - t0) / 1000)} s`);
+    await expect(env).toContainText('実行可能', { timeout: 120_000 });
+    const ok = page.locator('[data-testid="env-check"][data-status="ok"]');
+    await expect(ok.filter({ hasText: 'サンドボックスイメージ' })).toContainText('検証済み');
+  });
+
   test('RC-error: an invalid folder shows cause and fix, and start stays disabled', async () => {
     test.skip(phase !== 'error', 'LIVE_RC_PHASE=error のときだけ');
     const page = await connect();

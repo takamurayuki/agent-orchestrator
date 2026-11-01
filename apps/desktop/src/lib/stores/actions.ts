@@ -1,4 +1,4 @@
-import type { AcceptanceCriterion, DraftView, IpcEvent, RunEvent, RunStatus } from '@agent-orchestrator/contracts';
+import type { AcceptanceCriterion, DraftView, IpcEvent, RunEvent, RunStatus, SandboxSetupState } from '@agent-orchestrator/contracts';
 import { getTransport, toIpcCallError, type IpcParams } from '../api';
 import { isTerminalRunState, runStateLabel } from '../labels';
 import { app } from './app.svelte';
@@ -28,7 +28,39 @@ export async function initApp(): Promise<void> {
   } catch {
     app.runnerAlive = false;
   }
-  await Promise.all([checkEnvironment(), loadHistory()]);
+  await Promise.all([checkEnvironment(), loadHistory(), refreshSandboxStatus()]);
+}
+
+/** サンドボックス準備の現在状態（再接続時の復元用。未対応ランナーでは無視） */
+export async function refreshSandboxStatus(): Promise<void> {
+  const transport = getTransport();
+  try {
+    app.sandboxSetup = await transport.call('sandbox.status', {});
+  } catch {
+    app.sandboxSetup = null;
+  }
+}
+
+/** GUI からサンドボックス（Docker イメージ）を準備する。ユーザーの明示的な同意（チェックボックス）の後だけ呼ぶ。 */
+export async function startSandboxSetup(): Promise<void> {
+  const transport = getTransport();
+  const state = await guarded('サンドボックス準備', () => transport.call('sandbox.setup', { acknowledgePull: true }));
+  if (state) {
+    app.sandboxSetup = state;
+    app.announce('サンドボックスの準備を開始しました。ベースイメージの取得とビルドには数分かかります');
+  }
+}
+
+export async function cancelSandboxSetup(): Promise<void> {
+  const transport = getTransport();
+  const state = await guarded('サンドボックス準備のキャンセル', () => transport.call('sandbox.cancel', {}));
+  if (state) app.sandboxSetup = state;
+}
+
+/** 作業用コピーのフォルダーを OS で開く（Tauri のみ。worktrees 配下に限定） */
+export async function revealWorktree(path: string): Promise<void> {
+  const transport = getTransport();
+  await guarded('フォルダーを開く', () => transport.revealWorktree(path));
 }
 
 export async function checkEnvironment(): Promise<void> {
@@ -241,6 +273,18 @@ export function handleRunnerEvent(event: IpcEvent): void {
       const run = event.payload as unknown as RunStatus;
       if (app.run && run.runId === app.run.runId) applyRunStatus(run);
       else app.upsertHistory(run);
+      return;
+    }
+    case 'sandbox.progress': {
+      const next = event.payload as unknown as SandboxSetupState;
+      const previous = app.sandboxSetup;
+      app.sandboxSetup = next;
+      if (next.state === 'succeeded' && previous?.state !== 'succeeded') {
+        app.announce('サンドボックスの準備が完了しました。環境を再チェックします');
+        void checkEnvironment();
+      } else if (next.state === 'failed' && previous?.state !== 'failed') {
+        app.announce(`サンドボックスの準備に失敗しました: ${next.error?.message ?? ''}`);
+      }
       return;
     }
     default:

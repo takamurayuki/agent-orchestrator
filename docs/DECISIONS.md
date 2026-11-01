@@ -223,3 +223,15 @@ SPEC.md を唯一の要件ベースラインとし、契約の曖昧さ・不整
 - **決定:** 結果・進捗の表示は `apps/desktop/src/lib/outcome.ts` の純粋関数（`describeOutcome` / `describeActivity` / `severityImpact`）で state・reasonCode・イベントを平易な日本語（見出し・原因・変更の状態・次にできること）に変換する。バックエンドの状態遷移・reasonCode・nextActions は変更しない（nextActions は「技術者向け」として折りたたみに残す）。元プロジェクトへの反映機能は未実装のため、反映ボタンは表示せず、GUI から安全な操作（変更内容を見る / 作業用コピーのパスをコピー / 新しい依頼）だけを出す。実行画面は AI 出力・コマンド出力の生ログを表示せず、イベント要約でも `excerpt / raw / stdout / stderr / output / log / prompt / result` 系のフィールドは「[非表示 N 文字]」に伏せる。
 - **理由:** v2.2 の UX レビュー（P0: 次の手動操作が CLI 前提、P1: 承認画面の長さ・進捗の不透明さ）。状態機械や Policy Gate を UI の都合で緩めない、という制約の下で、表示層だけで改善する。
 - **検証:** モックに `mockRun=needs_human|precheck_failed` と終了 Run の sessionStorage 永続化を加え、`ui-11-14.spec.ts` で COMPLETED / NEEDS_HUMAN / PRECHECK_FAILED の表示、承認前後の遷移と再承認、進捗の「現在の処理」、リロード後の履歴を検証。既存の Playwright 13 件は維持（折りたたみ化に伴う locator の調整のみ）。
+
+## D-36 サンドボックスイメージは GUI から固定手順で取得・ビルドし、ダイジェスト／ラベルで検証する（v0.1.0 公開準備）
+
+- **決定:** `docker/manifest.json` にバージョン・ベースイメージ（タグ）・ベースイメージのダイジェスト・作成するイメージを固定する。runner は `docker/` のビルドコンテキストを `apps/runner/src/sandbox/assets.generated.ts` に埋め込み（`scripts/gen-sandbox-assets.mjs`、runner build で生成）、IPC `sandbox.setup`（`acknowledgePull: true` 必須）で次の固定手順だけを実行する: `docker info` → `docker pull <base>@<digest>` → `RepoDigests` にダイジェストが含まれることを検証 → 一時ディレクトリに書き出したコンテキストで `docker build --pull=false --build-arg NODE_IMAGE=<base>@<digest> --label version --label base-digest` × 2 → ビルド結果のラベル検証（不一致は `docker rmi` して失敗）。進捗は `sandbox.progress` イベント、`sandbox.cancel` で中止。セットアップチェック（environment.check）も毎回ラベルを照合し、不一致は `fail`（使用しない）。配布版でも開発版でも同じ手順（`scripts/build-images.mjs` も manifest を使う）。
+- **理由:** 配布版にはリポジトリが無く、`pnpm sandbox:build` を要求すると非 CLI 利用者がインストール直後に詰まる。レジストリへのイメージ公開は未実施なので、ピン留めしたベースイメージからローカルでビルドする。外部取得はユーザーの明示的な同意の後だけ行う。
+- **安全性:** 任意のシェルコマンド実行は追加しない（docker の固定引数のみ、`ALLOWED_COMMANDS` の範囲内）。Docker 隔離・seccomp・egress 制御は変更なし。ダイジェスト不一致・ラベル不一致は fail-closed（停止し、原因と復旧方法を表示）。
+- **検証:** `sandbox-setup.test.ts`（同意なしで何も実行しない、固定手順と引数、ダイジェスト不一致で停止、ビルド失敗の原因・復旧、ラベル不一致で rmi、キャンセルと再試行、二重起動拒否）、Playwright `ui-15.spec.ts`（成功 / 検証失敗と再試行 / ビルド失敗 / キャンセル）、配布ビルドでイメージ無しから GUI だけで準備して実タスク完了（`docs/RC_VERIFICATION.md`）。
+
+## D-37 「作業用コピーのフォルダーを開く」は worktrees 配下に限定した固定コマンドで実装する（v0.1.0 公開準備）
+
+- **決定:** Tauri コマンド `reveal_worktree(path)` は、`<app-data>/worktrees`（または `AGENT_ORCHESTRATOR_WORKTREES`）配下の既存ディレクトリに正規化後のパスが含まれる場合だけ、OS のファイルマネージャー（Windows: `explorer.exe <path>`）をシェルを介さず起動する。それ以外は拒否。元プロジェクトへの反映（コミット・push）機能は実装しない。
+- **理由:** 結果画面からワークツリーを確認する手段がパスのコピーだけでは非 CLI 利用者に不十分（UX レビュー P0）。一方で UI から任意のパスやコマンドを開く能力は与えない。

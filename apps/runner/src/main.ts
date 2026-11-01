@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { createRequire } from 'node:module';
-import type { DraftView, RunEvent, RunStatus } from '@agent-orchestrator/contracts';
+import type { DraftView, RunEvent, RunStatus, SandboxSetupState } from '@agent-orchestrator/contracts';
 import { ClaudeBuilder } from './agents/claude.js';
 import { CodexReviewer } from './agents/codex.js';
 import { ClaudeInterviewModel } from './agents/requirements.js';
@@ -10,6 +10,7 @@ import { LocalEnvironmentAdapter } from './environment.js';
 import { IpcServer } from './ipc.js';
 import { DockerSandbox } from './isolation/docker.js';
 import { createPreflight } from './preflight.js';
+import { SandboxSetupService } from './sandbox/setup.js';
 import { RepoInspector } from './requirements/repo-inspector.js';
 import { DraftService } from './requirements/service.js';
 import { RunService } from './run-service.js';
@@ -58,7 +59,8 @@ export function createRuntime(env: NodeJS.ProcessEnv = process.env) {
   const claudeCreds = () => loadClaudeCredentials(env);
   const codexCreds = () => loadCodexCredentials(env);
 
-  const listeners = { draft: new Set<(v: DraftView) => void>(), run: new Set<(s: RunStatus) => void>(), event: new Set<(e: RunEvent) => void>() };
+  const listeners = { draft: new Set<(v: DraftView) => void>(), run: new Set<(s: RunStatus) => void>(), event: new Set<(e: RunEvent) => void>(), sandbox: new Set<(s: SandboxSetupState) => void>() };
+  const sandboxSetup = new SandboxSetupService({ config, onProgress: (s) => listeners.sandbox.forEach((l) => l(s)) });
 
   const drafts = new DraftService({
     repo,
@@ -86,7 +88,7 @@ export function createRuntime(env: NodeJS.ProcessEnv = process.env) {
     onRunUpdated: (s) => listeners.run.forEach((l) => l(s)),
     onRunEvent: (e) => listeners.event.forEach((l) => l(e))
   });
-  return { config, layout, db, repo, workspace, environment, sandbox, recorder, inspector, drafts, runs, listeners };
+  return { config, layout, db, repo, workspace, environment, sandbox, recorder, inspector, drafts, runs, listeners, sandboxSetup };
 }
 
 export function registerHandlers(server: IpcServer, rt: ReturnType<typeof createRuntime>): void {
@@ -109,6 +111,10 @@ export function registerHandlers(server: IpcServer, rt: ReturnType<typeof create
   });
   server.register('run.list', async (p) => ({ runs: rt.runs.list((p as { limit?: number }).limit ?? 50) }));
   server.register('run.report', async (p) => rt.runs.report((p as { runId: string }).runId));
+  server.register('sandbox.setup', async (p) => rt.sandboxSetup.start(p as { acknowledgePull: true }));
+  server.register('sandbox.cancel', async () => rt.sandboxSetup.cancel());
+  server.register('sandbox.status', async () => rt.sandboxSetup.status());
+  rt.listeners.sandbox.add((s) => server.emit({ event: 'sandbox.progress', payload: s as unknown as Record<string, unknown> }));
 
   rt.listeners.draft.add((v) => server.emit({ event: 'draft.updated', payload: v as unknown as Record<string, unknown> }));
   rt.listeners.run.add((s) => server.emit({ event: 'run.updated', runId: s.runId, payload: s as unknown as Record<string, unknown> }));
