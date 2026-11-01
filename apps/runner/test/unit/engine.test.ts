@@ -212,6 +212,10 @@ describe('RunEngine state machine (SPEC §6)', () => {
     expect(mock.calls.reviewer).toBe(0);
     expect(mock.builderInputs[1]?.feedback?.policyFindings.join(' ')).toContain('PG-ESLINT-DISABLE');
     expect(mock.recorder.artifacts.has('1/policy.json')).toBe(true);
+    // v2.2: POLICY_BLOCKED を経由し、差し戻し内容が feedback.json に残る
+    const transitions = mock.recorder.events.filter((e) => e.type === 'run.state_changed').map((e) => e.payload.to);
+    expect(transitions.slice(0, 5)).toEqual(['PREFLIGHT', 'IMPLEMENTING', 'POLICY_BLOCKED', 'IMPLEMENTING', 'POLICY_BLOCKED']);
+    expect(mock.recorder.artifacts.get('2/feedback.json')).toContain('PG-ESLINT-DISABLE');
     expect(mock.recorder.events.some((e) => e.type === 'policy.gate' && e.payload.blocking === 1)).toBe(true);
   });
 
@@ -228,6 +232,8 @@ describe('RunEngine state machine (SPEC §6)', () => {
     expect(mock.calls.verifier).toBe(1);
     expect(mock.calls.reviewer).toBe(1);
     expect(mock.recorder.rounds.get(2)?.policyFindings).toEqual([]);
+    const transitions = mock.recorder.events.filter((e) => e.type === 'run.state_changed').map((e) => e.payload.to);
+    expect(transitions).toEqual(['PREFLIGHT', 'IMPLEMENTING', 'POLICY_BLOCKED', 'IMPLEMENTING', 'VERIFYING', 'REVIEWING', 'COMPLETED']);
   });
 
   it('v2.1: a human-approved exception in the BASE commit lets the violation pass; the AI cannot add one in the working tree', async () => {

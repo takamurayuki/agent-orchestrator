@@ -2,6 +2,55 @@
 
 作成日: 2026-11-01（リリース準備フェーズ後に更新）　対象: `docs/SPEC.md` v2.0　受入結果: `docs/ACCEPTANCE_REPORT.md`（**PASS 56 / FAIL 0 / NOT_RUN 0**）
 
+## 0‴. v2.2 品質安定化・UX 検証の結果（2026-11-01 追記）
+
+### Phase 1 Policy Gate の堅牢化 — 実装済み（D-31）
+
+- 解析は TypeScript コンパイラ API（パーサ駆動のコメント範囲 / AST / JSONC パーサ）に限定し、**正規表現によるソース解析への置換は禁止**（D-31 に明記）。
+- 回帰テスト（`policy-gate.test.ts` v2.2 群）: テンプレートリテラル内、正規表現リテラル（`/\/\/ eslint-disable/`）、JSX 式コンテナ内ディレクティブ（検出）と JSX テキスト（非検出）、複数行ブロックコメント、CRLF の行番号（LF→CRLF だけの変更は新規ではない）、Unicode（日本語・絵文字・サロゲートペア）。
+- 判定不能は成功扱いにしない: 構文エラーのあるファイルは `PG-UNPARSEABLE`（blocking、可能な範囲で解析を続け eslint-disable 等も併せて検出）、JSONC 設定の破損も `PG-UNPARSEABLE`、検出器の例外は `PG-ANALYSIS-ERROR`（blocking）。
+- 偽陽性の確認: runner の全ソース・テスト（30 ファイル超）を「新規ファイル」として評価し 0 件になる回帰テストを常設。`scripts/policy-gate-audit.mjs` 再実行: ドッグフーディング 17 ワークスペース（v2.2 の 3 件を含む）で AI 生成差分の真陽性 3（旧 2 件 + 本フェーズの `// eslint-disable-next-line no-console -- ...`）、偽陽性 0。自リポジトリのコミット c91bd00 の検証 scripts 強化は Phase 4 の分類で **warning**（「強化された（要確認）」）になり blocking ではなくなった。
+
+### Phase 2 Policy Gate 差し戻しループの実測 — 一部観測（D-33）
+
+| 実行 | 経路 | 状態遷移（run.state_changed の実ログ） | 結果 |
+|---|---|---|---|
+| `v22-policy-loop` | ヒアリング（`--prefer eslint_disable,...`）→ 承認 → Run | PREFLIGHT → IMPLEMENTING → NEEDS_HUMAN | 機械回答が Q-003 で「例外は登録済み」（虚偽）を選択。Requirements Agent は Policy Gate を知っているため要件に「例外が無ければ停止」を織り込み、Builder はベースコミットに policy.json が無いことを確認して**変更せず停止**（NO_CHANGES）。Builder $0.03、328 s |
+| `v22-policy-loop-2` | ヒアリング（Q-002 で「後で例外登録」）→ 承認 → Run | PREFLIGHT → **IMPLEMENTING → POLICY_BLOCKED → IMPLEMENTING → VERIFYING → REVIEWING** → IMPLEMENTING → POLICY_BLOCKED → NEEDS_HUMAN | Round 1: Builder が `// eslint-disable-next-line no-console` を追加 → `policy.gate`（blocking 1、PG-ESLINT-DISABLE）→ POLICY_BLOCKED。Round 2: `builder.started` に `hasFeedback:true, feedbackKinds.policy:1`、`rounds/2/feedback.json` に違反と修正指示 → Builder が `process.stdout.write` に修正、Policy Gate 0 件、検証 4/4 PASS、Codex は「要件が console.log と抑制コメントを明示しているのに逸脱」で changes_requested（high 2）。Round 3: Builder が再び eslint-disable を書き → POLICY_BLOCKED → 上限で NEEDS_HUMAN / POLICY_VIOLATION。Builder 合計 $0.17、304 s |
+| `v22-policy-loop-3` | 人間が書いた task.yaml（抑制コメントは「付けてよい」）を直接承認 → Run（`scripts/live-policy-loop.mjs`） | PREFLIGHT → IMPLEMENTING → VERIFYING → REVIEWING → COMPLETED | Builder はラウンド 1 から `process.stdout.write` を選び違反なし。Policy Gate 0 件、検証 PASS、Codex approved。Builder $0.05、137 s |
+
+- **観測できた条件:** ラウンド 1 で実際に blocking 違反が出る（実行 2）／指摘が Claude Code に渡ったことのログ証跡（`builder.started.feedbackKinds.policy=1`、`rounds/2/feedback.json`、`policy.gate` イベント）／後続ラウンドで違反が解消される（実行 2 の Round 2: Policy Gate 0 件、検証 PASS、レビュー実行）。
+- **未観測:** 差し戻し後に **COMPLETED** まで到達する経路（`... → REVIEWING → COMPLETED`）。実行 2 では要件そのものが抑制コメントを必須にしていたため、Codex が要件に照らして逸脱を正しく指摘し、Builder が要件に従って再び違反 → NEEDS_HUMAN。これは「依頼と Policy Gate が矛盾したら人間が決める」という設計どおりの fail-closed であり、人間レビューも妥当と判断（`docs/dogfood-review.json`）。逆に要件に規約へ合わせる余地があると（実行 3）Builder は最初から違反を生まない。3 回（Builder 合計約 $0.25、約 13 分）で打ち切り、未観測として記録する。モックでは `engine.test.ts` v2.1 case 8 で `IMPLEMENTING → POLICY_BLOCKED → IMPLEMENTING → VERIFYING → REVIEWING → COMPLETED` の遷移列を検証済み。
+- 副産物: Requirements Agent が Policy Gate の存在を要件（「例外が無ければ停止」）に織り込む挙動を確認（実行 1）。虚偽の前提（「登録済み」）で承認しても Builder はベースコミットを確認して止まる。
+
+### Phase 3 意思決定ログの改善 — 実装済み（D-32）
+
+- 共通 `DecisionRecord`（topicKey / source / kind / question / options / chosen / chosenLabel / rationale / consequence / evidence / relatedRequirements / decidedAt / history / supersededBy / status）。通常質問・矛盾解消・承認前修正をすべて記録。
+- 「戻る」は `retracted`、再回答は履歴に積む。矛盾する判断（同じ問い / 同じ対象要件 / 矛盾解消が名指しした判断）は新しい方を優先し古い方を `superseded`。素案生成・矛盾検出には active な判断を「拘束力のある判断（後の判断が優先、revision は最新の明示的指示）」として渡し再質問しない。
+- 検証: `decisions.test.ts` 6 件、`draft-service.test.ts` 追加 3 件（記録・履歴・revision・superseded・propose への受け渡し・decisions.json）。実機（実行 2）でも Q-001 / Q-002 の判断が `source: interview`、理由（推奨案の引用）付きで記録されたことを確認。
+
+### Phase 4 検証スクリプト変更の分類 — 実装済み（D-34）
+
+- 無効化・削除 = blocking、`&&` での追加・厳格化フラグの追加 = warning（内容を提示、完了は可）、機械的に判断できない変更 = blocking（人間の例外登録が必要）。AI は例外を承認できない（例外はベースコミットの policy.json のみ）。
+- 検証: `policy-gate.test.ts` Phase 4 群、監査で自コミット c91bd00 が warning に分類されることを確認。
+
+### Phase 5 UI ユーザビリティ — 実施（`docs/UX_REVIEW.md`）
+
+- `apps/desktop/e2e/ux-walkthrough.spec.ts`（`UX_WALKTHROUGH=1`）で 4 画面 11 枚のスクリーンショットを取得し、非 CLI 利用者視点で評価。良い点 6 項目、問題点 12 項目を P0〜P3 で優先度付け（P0: 要確認 / 完了時の「次の手動操作」が CLI 前提、P1: 質問中の承認セクションの情報過多、承認画面の長さと所要時間・利用量の目安欠如、進捗中の「今なにをしているか」、専門用語）。
+- 本フェーズで対応した小改善: 実行画面で `POLICY_BLOCKED` を「実装（ポリシー違反で差し戻し中）」として表示し説明文を追加。モックにも意思決定ログを実装し UI で確認可能に。
+- 外部テスターは確保できず未実施（募集時の観点を記載）。
+
+### 完了基準の確認
+
+| 基準 | 結果 |
+|---|---|
+| 既存テストと新規テストがすべて PASS | Vitest 200 passed（実 Docker 7 件を含む。`CI=1 RUN_DOCKER_TESTS=1`）、LIVE-01 headless 再実行 PASS（157 s）。LIVE-02 は実 Docker テスト 7 件の再実行で代替、LIVE-03（インストーラ）は再実測なし（Rust / サイドカーに変更なし）、Playwright 13（+ ウォークスルー 4、既定はスキップ）、tsc / svelte-check / cargo check / eslint クリーン |
+| Policy Gate の差し戻しループを実機で確認 | 一部観測（IMPLEMENTING → POLICY_BLOCKED → IMPLEMENTING → VERIFYING → REVIEWING、ログ証跡あり）。差し戻し後の COMPLETED は未観測（上記理由） |
+| 意思決定ログの保存と再利用を確認 | テストと実機で確認（decisions.json / DraftView.decisions / propose プロンプトの拘束判断） |
+| UX 課題を優先度付きで整理 | `docs/UX_REVIEW.md` |
+| ドキュメント更新 | README、DECISIONS（D-31〜D-34）、QUALITY_REPORT、UX_REVIEW、本レポート |
+| 制約 | Docker 隔離・ネットワーク制限・権限制御は変更なし。push / merge / deploy なし。実 CLI の利用は 3 Run + LIVE 再実行（Builder 合計 < $1） |
+
 ## 0″. v2.1 品質保証強化の結果（2026-11-01 追記）
 
 ### Phase 1 Policy Gate（P0）— 実装済み（D-29）

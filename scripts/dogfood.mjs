@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // ドッグフーディング: 実リポジトリのコピーに対して依頼 → ヒアリング（機械回答）→ 承認 → Run を実行し、指標を JSON に記録する。
-// 使い方: node scripts/dogfood.mjs --name <id> --repo <path> --request "<依頼>" [--answer <value>] [--app-data <dir>]
+// 使い方: node scripts/dogfood.mjs --name <id> --repo <path> --request "<依頼>" [--answer <value>] [--prefer v1,v2,...] [--app-data <dir>]
+//   --prefer: 選択肢の value が一致（部分一致可）するものを優先して選ぶ（v2.2 Policy Gate 差し戻しループの再現用。既定は先頭の選択肢）
 // 実 CLI（Claude Code / Codex）を呼ぶ。予算: Builder --max-budget-usd 10、RA 3、cliTimeoutSeconds 900、試行 3 回（task.yaml 既定）。
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
@@ -16,6 +17,14 @@ const name = arg('--name');
 const repo = resolve(arg('--repo'));
 const request = arg('--request');
 const freeAnswer = arg('--answer', '既存の規約に合わせて最小限で実装してください。判断が必要な点は推奨案に従ってください。');
+const prefer = (arg('--prefer', '') || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+const pick = (q) => {
+  for (const p of prefer) {
+    const hit = q.options.find((o) => o.value.toLowerCase() === p) ?? q.options.find((o) => o.value.toLowerCase().includes(p) || o.label.toLowerCase().includes(p));
+    if (hit) return hit.value;
+  }
+  return q.options[0]?.value ?? freeAnswer;
+};
 if (!name || !repo || !request) throw new Error('usage: --name --repo --request');
 const appData = resolve(arg('--app-data', join(root, '.tmp', 'dogfood-app-data', name)));
 mkdirSync(appData, { recursive: true });
@@ -33,12 +42,15 @@ try {
   for (let i = 0; i < 6 && draft.state === 'ASKING'; i++) {
     metrics.interview.rounds = draft.round;
     for (const q of draft.currentQuestions) metrics.interview.questions.push({ id: q.id, impact: q.decisionImpact, question: q.question, options: q.options.map((o) => o.value), recommendation: q.recommendation.slice(0, 200) });
-    draft = await rt.drafts.answer({ draftId: draft.id, answers: draft.currentQuestions.map((q) => ({ questionId: q.id, value: q.options[0]?.value ?? freeAnswer, skipped: false })) });
+    const chosen = draft.currentQuestions.map((q) => ({ questionId: q.id, value: pick(q), skipped: false }));
+    for (const c of chosen) metrics.interview.questions.find((x) => x.id === c.questionId).chosen = c.value;
+    draft = await rt.drafts.answer({ draftId: draft.id, answers: chosen });
   }
   metrics.phases.interviewMs = Date.now() - tDraft;
   metrics.interview.finalState = draft.state;
   metrics.interview.summary = draft.summary;
   metrics.interview.proposal = draft.proposal;
+  metrics.interview.decisions = draft.decisions;
   if (draft.state !== 'AWAITING_APPROVAL') {
     metrics.interview.blocked = draft.blockedReason ?? draft.validationErrors.join('; ');
     console.log(`[dogfood] draft did not reach approval: ${draft.state} ${metrics.interview.blocked}`);
@@ -60,9 +72,16 @@ try {
         diffFiles: r.diff?.files.map((f) => `${f.status} ${f.path} +${f.additions} -${f.deletions}`) ?? [],
         verification: r.verification ? { passed: r.verification.passed, commands: r.verification.commands.map((c) => `${c.name}:${c.exitCode}${c.timedOut ? ':timeout' : ''}:${c.durationMs}ms`) } : null,
         review: r.review ? { verdict: r.review.parsed?.verdict ?? null, parseError: r.review.parseError, durationMs: r.review.durationMs, findings: r.review.parsed?.findings.map((f) => `[${f.severity}] ${f.id} ${f.file}:${f.line} ${f.description}`) ?? [], unverified: r.review.parsed?.requirementsUnverified ?? [], summary: r.review.parsed?.summary ?? null } : null,
-        hashMatch: r.workspaceHashBeforeReview !== null && r.workspaceHashBeforeReview === r.workspaceHashAfterReview
+        hashMatch: r.workspaceHashBeforeReview !== null && r.workspaceHashBeforeReview === r.workspaceHashAfterReview,
+        policyFindings: (r.policyFindings ?? []).map((p) => `[${p.severity}${p.approved ? '/approved' : ''}] ${p.ruleId} ${p.file}:${p.line} ${p.evidence}`),
+        feedbackArtifact: existsSync(join(final.runDir, 'rounds', String(r.round), 'feedback.json')) ? JSON.parse(readFileSync(join(final.runDir, 'rounds', String(r.round), 'feedback.json'), 'utf8')) : null
       });
     }
+    // 状態遷移とフィードバック受け渡しのログ証跡（v2.2 Phase 2）
+    const events = rt.repo.listEvents(started.runId);
+    metrics.transitions = events.filter((e) => e.type === 'run.state_changed').map((e) => e.payload.to);
+    metrics.builderStarts = events.filter((e) => e.type === 'builder.started').map((e) => ({ round: e.round, payload: e.payload }));
+    metrics.policyGateEvents = events.filter((e) => e.type === 'policy.gate').map((e) => ({ round: e.round, payload: e.payload }));
     const egressPath = join(final.runDir, 'egress.jsonl');
     if (existsSync(egressPath)) {
       const lines = readFileSync(egressPath, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));

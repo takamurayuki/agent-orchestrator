@@ -93,7 +93,7 @@ Run の起動前には、変更前のリポジトリに対して検証プロフ�
 - **入力検証**: すべての AI 出力と YAML を Zod + JSON Schema で二重検証。IPC は method allowlist と Zod params。子プロセスは常に `shell:false`、コマンド名 allowlist。
 - **リポジトリ調査**: read-only、`.env` / 鍵 / 認証ファイルを除外、symlink を辿らない、ファイル数・サイズ・時間の上限。README 等の内容は非信頼データとしてモデルに渡す。
 
-## 品質保証（v2.1）
+## 品質保証（v2.1 / v2.2）
 
 - **Policy Gate（静的チェック）**: 各ラウンドの差分に対し、AI レビューとは独立に、新規の `eslint-disable` / `@ts-ignore` / `@ts-nocheck`、テストの `skip` / `only` / `todo` 追加、テストファイル削除、必須検証 scripts（typecheck / lint / test:run）の削除・無効化・変更、tsconfig / ESLint / Vitest・Jest・Playwright 設定の緩和を検出します。ベースコミットの内容と比較するので既存の違反は数えません。コメント・テスト構文・設定は AST（TypeScript コンパイラ API）で解析し、文字列内の一致は無視します。未承認の違反は Builder に差し戻され（修正可能）、残ったままでは完了できません。AI レビューの approved では上書きできません。
 - **例外の承認**: 意図的な例外は**ベースコミット**の `.agent-orchestrator/policy.json` に理由付きで登録します（作業ツリー側＝AI が書いた内容は無視）。
@@ -101,6 +101,10 @@ Run の起動前には、変更前のリポジトリに対して検証プロフ�
   { "allow": [{ "ruleId": "PG-ESLINT-DISABLE", "file": "src/legacy/**", "reason": "移行中のため no-console を許容" }] }
   ```
 - **矛盾検出**: ヒアリングの最後に、要件同士と要件と既存コード・設定（lint ルール、型設定、既存実装）の矛盾を検出し、重大なものは選択肢と影響を示す質問として差し戻します。解消するまで承認できず、判断は意思決定ログ（`decisions.json`、画面の「意思決定ログ」）に残ります。
+- **判定不能は不合格（v2.2、D-31）**: 構文エラーで解析できないファイルは `PG-UNPARSEABLE`、検出器の例外は `PG-ANALYSIS-ERROR` として blocking にし、「検出 0 件」と区別します。ソース解析は TypeScript コンパイラ API に限定し、正規表現によるソース解析は行いません。
+- **検証 scripts の変更分類（v2.2、D-34）**: 削除・無効化は blocking、`&&` での追加や厳格化フラグの追加は warning（内容を表示、完了は可）、どちらとも機械的に判断できない変更は blocking で人間の例外登録が必要です。AI は例外を承認できません。
+- **意思決定ログ（v2.2、D-32）**: 通常質問の回答・矛盾の解消・承認前の要件修正を共通の形式（出所・選択肢・理由・影響・対象要件・履歴・状態）で記録します。「戻る」は取り消しとして履歴に残り、同じ事項に矛盾する判断があれば新しい方を優先して古い方を `superseded` にします。素案の再生成時は有効な判断を拘束条件として渡すため、再質問しません。
+- **ポリシー差し戻しの可視化（v2.2、D-33）**: 未承認の違反があるラウンドは `POLICY_BLOCKED` 状態を経て Builder に戻り、渡したフィードバックは `rounds/<n>/feedback.json` に残ります。
 
 ## 永続化と出力
 
@@ -108,7 +112,7 @@ Run の起動前には、変更前のリポジトリに対して検証プロフ�
 ~/.agent-orchestrator/app-data/           （AGENT_ORCHESTRATOR_APP_DATA で変更可）
   orchestrator.sqlite                      projects / drafts / draft_revisions / questions / answers / approved_tasks / runs / run_events / review_findings / run_rounds
   tasks/<taskId>/revisions/<rev>/task.yaml
-  runs/<runId>/{task.snapshot.yaml, metadata.json, events.jsonl, status.json, report.md, rounds/<n>/{builder.log,verify.json,verify.log,review.json,review.raw.txt,review.log,diff.patch,round.json}}
+  runs/<runId>/{task.snapshot.yaml, metadata.json, events.jsonl, status.json, report.md, egress.jsonl, rounds/<n>/{builder.log,verify.json,verify.log,review.json,review.raw.txt,review.log,diff.patch,round.json,policy.json,feedback.json}}
   worktrees/<runId>/                        隔離ワークスペース（失敗時も保全。削除は手動）
 ```
 
@@ -123,6 +127,7 @@ RUN_DOCKER_TESTS=1 pnpm test:docker                  # 実 Docker: 隔離・egre
 pnpm test:e2e                                        # Playwright（UI、モックトランスポート）
 RUN_LIVE_E2E=1 pnpm vitest run tests/e2e             # 実 CLI の LIVE-01/02（費用と時間がかかる。専用サンプルリポジトリを自動生成）
 pnpm acceptance                                      # ACCEPTANCE.md の ID ごとに PASS/FAIL/NOT_RUN を集計 → docs/ACCEPTANCE_REPORT.md
+UX_WALKTHROUGH=1 pnpm --filter @agent-orchestrator/desktop exec playwright test e2e/ux-walkthrough.spec.ts   # 4 画面のスクリーンショットを .tmp/ux/ に保存（docs/UX_REVIEW.md の根拠）
 ```
 
 ## 配布ビルド（Node 同梱サイドカー）
@@ -143,6 +148,10 @@ set WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9333
 pnpm --filter @agent-orchestrator/desktop run tauri:dev      # または target/release の exe
 LIVE_CDP_URL=http://127.0.0.1:9333 LIVE_SAMPLE_REPO=<sample repo> pnpm --filter @agent-orchestrator/desktop exec playwright test -c playwright.live.config.ts
 #   LIVE_MODE=smoke（環境チェック + プロジェクト選択のみ）、LIVE_EXPECT_ENV_FAIL=1（利用不可表示の確認）
+# ドッグフーディング（ヒアリング→承認→Run を機械回答で通す。--prefer で選択肢を指定可）
+node scripts/dogfood.mjs --name <id> --repo <path> --request "<依頼>" [--prefer eslint_disable,...]
+# Policy Gate 差し戻しループの再現（人間が書いた task.yaml を直接承認して Run）
+node scripts/live-policy-loop.mjs --name <id> --repo <path> --task tests/fixtures/tasks/policy-loop-console.yaml
 ```
 
 実行結果は `docs/FINAL_REPORT.md` と `docs/ACCEPTANCE_REPORT.md`（`test-results/live.json` を集計）に記録しています。モデル API を呼ぶため費用が発生します（LIVE-01 の 1 回あたり: Claude 数十円規模、Codex はサブスクリプション消費）。

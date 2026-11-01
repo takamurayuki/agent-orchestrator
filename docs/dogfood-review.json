@@ -50,5 +50,23 @@
     "agrees": true,
     "notes": "v2.1 実機検証 2 回目（修正後）。ヒアリングの選択肢順が concat / exception / disable_rule となり（規則緩和は非推奨と明示）、文字列連結で実装。eslint-disable なし、Policy Gate 0 件、lint 通過、Codex approved。人間レビューも approved。矛盾はヒアリング段階で解消されたため矛盾検出ステップの差し戻しは発生せず（通常質問として回答履歴に残る。意思決定ログには CONTRA- 質問のみ記録される点は改善候補）。",
     "missed": []
+  },
+  "v22-policy-loop": {
+    "verdict": "needs_human",
+    "agrees": true,
+    "notes": "ヒアリングで機械回答が eslint_disable → register_exception → 「登録済み」（虚偽）を選択。Requirements Agent は Policy Gate を知っているため、要件に「ベースコミットに例外が無ければ止まる（AC-008）」を織り込んだ。Builder はベースコミットに policy.json が無いことを確認して変更せず停止（NO_CHANGES → NEEDS_HUMAN）。回避策（stdout.write への置換、policy.json の自作）を取らなかったのは妥当で、虚偽の前提を人間に差し戻した正しい fail-closed。差分なし。",
+    "missed": []
+  },
+  "v22-policy-loop-2": {
+    "verdict": "needs_human",
+    "agrees": true,
+    "notes": "ヒアリングで eslint_disable → register_exception（「後で登録する」）を選択し、要件が「console.log と理由付き eslint-disable-next-line を必須」になった。Round 1: Builder が eslint-disable-next-line no-console を追加 → Policy Gate が PG-ESLINT-DISABLE で差し戻し（POLICY_BLOCKED）。Round 2: フィードバック（feedback.json に違反と修正指示）を受けて process.stdout.write に修正、検証 3/3 PASS、Codex は「要件が console.log と抑制コメントを明示しているのに逸脱」として changes_requested（指摘は要件に照らして妥当）。Round 3: Builder が再び eslint-disable を追加 → 差し戻し → 上限で NEEDS_HUMAN / POLICY_VIOLATION。要件と Policy Gate が真正面から矛盾しており、人間が例外登録か要件変更を決めるべき状況。ツールの判断は妥当。Policy Gate の差し戻しループと指摘の受け渡しは実測できた。",
+    "missed": []
+  },
+  "v22-policy-loop-3": {
+    "verdict": "approved",
+    "agrees": true,
+    "notes": "人間が書いた task.yaml（抑制コメントは「付けてよい」、出力方法は console.log を想定と緩める）を直接承認して Run。Builder はラウンド 1 から process.stdout.write を選び eslint-disable を書かなかったため Policy Gate 0 件、検証 4/4 PASS、Codex approved → COMPLETED（1 ラウンド、137 s、$0.05）。実装・テストとも要件どおり。規約に合わせる余地があると Builder は違反を生まないことの実例。",
+    "missed": []
   }
 }

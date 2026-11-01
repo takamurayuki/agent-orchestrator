@@ -1,0 +1,40 @@
+# v2.2 Phase 2: Policy Gate 差し戻しループ再現用の task.yaml（人間が記述。scripts/live-policy-loop.mjs が __REPO__ を置換する）。
+# 意図: 要件は「標準出力に出す（console.log を想定）」「必要なら該当行だけ抑制コメントを付けてよい」とし、Builder が
+# ラウンド 1 で eslint-disable を書く余地を残す。Policy Gate はベースコミットに例外が無いので PG-ESLINT-DISABLE で差し戻し、
+# Builder は規約に合う実装（process.stdout.write 等）へ修正できる。要件自体は抑制コメントを必須にしていないので、修正後も要件を満たせる。
+schemaVersion: 2
+id: TASK-POLICY-LOOP-CONSOLE-V22
+title: greetAndLog を追加して結果を標準出力に出す
+repository: __REPO__
+baseRef: main
+requirements:
+  - "src/greet.ts に export された greetAndLog(name: string): string を追加する。"
+  - greetAndLog(name) は greet(name) と同一の文字列を返す。
+  - greetAndLog(name) は戻り値を返す前に、その文字列を標準出力へ 1 回だけ出力する（console.log を想定）。
+  - ESLint は no-console が error になっている。必要なら console.log の行だけ抑制コメントを付けてよい（eslint.config.js は変更しない）。
+  - 既存の greet の挙動とシグネチャは変更しない。テンプレートリテラルは使わない（no-restricted-syntax）。
+  - test/greet.test.ts に greetAndLog のテストを追加し、標準出力への出力内容・出力回数・戻り値を検証する。
+  - typecheck、lint、test:run がすべて成功する。
+acceptanceCriteria:
+  - id: AC-001
+    given: src/greet.ts に greetAndLog が実装されている
+    when: greetAndLog を string 型の引数で呼ぶ
+    then: 戻り値は greet(name) と厳密に等しい
+  - id: AC-002
+    given: 標準出力（console.log または process.stdout.write）を spy している
+    when: greetAndLog(name) を呼ぶ
+    then: greet(name) と同じ文字列がちょうど 1 回出力される
+  - id: AC-003
+    given: 実装とテストが完了している
+    when: typecheck、lint、test:run を実行する
+    then: 3 つともエラーなしで終了する
+verificationProfile: node-pnpm
+limits:
+  maxImplementationAttempts: 3
+  maxDurationSeconds: 2700
+  cliTimeoutSeconds: 900
+  verificationTimeoutSeconds: 300
+review:
+  blockingSeverities:
+    - critical
+    - high

@@ -21,7 +21,7 @@ import type { DiffFile, PolicyFinding } from '@agent-orchestrator/contracts';
  *     （AI は現在の Run の間に例外を増やせない）
  */
 
-export const POLICY_RULE_IDS = ['PG-ESLINT-DISABLE', 'PG-TS-SUPPRESS', 'PG-TEST-SKIP', 'PG-TEST-DELETED', 'PG-VERIFY-SCRIPT', 'PG-TSCONFIG-RELAXED', 'PG-ESLINT-RELAXED', 'PG-TESTCONFIG-RELAXED'] as const;
+export const POLICY_RULE_IDS = ['PG-ESLINT-DISABLE', 'PG-TS-SUPPRESS', 'PG-TEST-SKIP', 'PG-TEST-DELETED', 'PG-VERIFY-SCRIPT', 'PG-TSCONFIG-RELAXED', 'PG-ESLINT-RELAXED', 'PG-TESTCONFIG-RELAXED', 'PG-UNPARSEABLE', 'PG-ANALYSIS-ERROR'] as const;
 export type PolicyRuleId = (typeof POLICY_RULE_IDS)[number];
 
 export interface PolicyException {
@@ -93,6 +93,13 @@ function scriptKind(path: string): ts.ScriptKind {
 
 function parse(path: string, text: string): ts.SourceFile {
   return ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true, scriptKind(path));
+}
+
+/** 構文エラー（パーサ診断）。TS の SourceFile は内部プロパティ parseDiagnostics を持つ（公開 API には無いが安定して存在） */
+export function syntaxErrors(path: string, text: string): string[] {
+  const sf = parse(path, text);
+  const diags = (sf as unknown as { parseDiagnostics?: ts.Diagnostic[] }).parseDiagnostics ?? [];
+  return diags.slice(0, 5).map((d) => `${lineOf(text, d.start ?? 0)}: ${ts.flattenDiagnosticMessageText(d.messageText, ' ')}`);
 }
 
 function globToRegExp(glob: string): RegExp {
@@ -198,10 +205,35 @@ export function collectTestSkips(path: string, text: string): SkipHit[] {
 interface ConfigHit {
   text: string;
   line: number;
+  /** 省略時 blocking。warning は完了を妨げないが内容を提示する（検証の追加・強化） */
+  severity?: 'blocking' | 'warning';
+}
+
+/**
+ * 検証 scripts の変更分類（v2.2、Phase 4）。
+ *   - 削除 / no-op 化 → blocking
+ *   - 旧コマンド全体が新コマンドに含まれ、`&&` / `;` で別コマンドが追加されている、または厳格化フラグが追加された → 「強化」として warning（内容を提示）
+ *   - それ以外（機械的に強化と判断できない） → blocking（人間の承認＝ベースコミットの例外登録が必要）
+ */
+const STRENGTHEN_FLAGS = ['--max-warnings', '--max-warnings=0', '--strict', '--noEmit', '--frozen-lockfile', '--coverage', '--run', '--bail', '--reporter=junit', '--passWithNoTests=false'];
+export function classifyScriptChange(was: string, now: string): 'removed' | 'noop' | 'strengthened' | 'unknown' | 'unchanged' {
+  const w = was.trim();
+  const n = now.trim();
+  if (n === w) return 'unchanged';
+  if (NOOP_SCRIPT_RE.test(n)) return 'noop';
+  if (n.includes(w)) {
+    const rest = n.replace(w, '').trim();
+    if (/^(&&|;)\s*\S/.test(rest) || /\S\s*(&&|;)$/.test(rest)) return 'strengthened';
+    const addedFlags = rest.split(/\s+/).filter(Boolean);
+    if (addedFlags.length > 0 && addedFlags.every((f) => STRENGTHEN_FLAGS.some((k) => f === k || f.startsWith(`${k}=`)) || /^--max-warnings(=\d+)?$/.test(f) || f === '0')) return 'strengthened';
+  }
+  return 'unknown';
 }
 
 export function parseJsonc(path: string, text: string): Record<string, unknown> | null {
   const r = ts.parseConfigFileTextToJson(path, text);
+  // 構文エラーがあれば（寛容パーサが部分的な config を返しても）解析不能として扱う（fail-closed、v2.2）
+  if (r.error) return null;
   return r.config && typeof r.config === 'object' ? (r.config as Record<string, unknown>) : null;
 }
 
@@ -252,9 +284,14 @@ export function verifyScriptChanges(before: string | null, after: string | null,
     const was = b?.scripts?.[s];
     const now = a?.scripts?.[s];
     if (typeof was !== 'string') continue; // ベースに無いものは対象外（readiness で別途判定）
-    if (typeof now !== 'string') hits.push({ text: `scripts.${s} が削除された（was: ${was}）`, line: findLine(after, '"scripts"') });
-    else if (NOOP_SCRIPT_RE.test(now)) hits.push({ text: `scripts.${s} が無効化された: ${JSON.stringify(now)}`, line: findLine(after, `"${s}"`) });
-    else if (now !== was) hits.push({ text: `scripts.${s} が変更された: ${JSON.stringify(was)} → ${JSON.stringify(now)}`, line: findLine(after, `"${s}"`) });
+    if (typeof now !== 'string') {
+      hits.push({ text: `scripts.${s} が削除された（was: ${was}）`, line: findLine(after, '"scripts"') });
+      continue;
+    }
+    const kind = classifyScriptChange(was, now);
+    if (kind === 'noop') hits.push({ text: `scripts.${s} が無効化された: ${JSON.stringify(now)}`, line: findLine(after, `"${s}"`) });
+    else if (kind === 'strengthened') hits.push({ text: `scripts.${s} が強化された（要確認）: ${JSON.stringify(was)} → ${JSON.stringify(now)}`, line: findLine(after, `"${s}"`), severity: 'warning' });
+    else if (kind === 'unknown') hits.push({ text: `scripts.${s} が変更された（強化と機械的に判断できないため人間の承認が必要）: ${JSON.stringify(was)} → ${JSON.stringify(now)}`, line: findLine(after, `"${s}"`) });
   }
   return hits;
 }
@@ -372,9 +409,9 @@ export function evaluatePolicyGate(input: PolicyGateInput): PolicyGateResult {
   const findings: PolicyFinding[] = [];
   const exceptions = input.exceptions ?? [];
   const required = input.requiredScripts ?? DEFAULT_REQUIRED_SCRIPTS;
-  const add = (ruleId: PolicyRuleId, file: string, line: number, evidence: string, message: string) => {
+  const add = (ruleId: PolicyRuleId, file: string, line: number, evidence: string, message: string, severity: 'blocking' | 'warning' = 'blocking') => {
     const approvedBy = exceptions.find((e) => e.ruleId === ruleId && (!e.file || globToRegExp(e.file).test(file)));
-    findings.push({ ruleId, severity: 'blocking', file, line, evidence: evidence.slice(0, 200), message, approved: Boolean(approvedBy), approvalReason: approvedBy?.reason ?? null });
+    findings.push({ ruleId, severity, file, line, evidence: evidence.slice(0, 200), message, approved: Boolean(approvedBy), approvalReason: approvedBy?.reason ?? null });
   };
 
   for (const f of input.files) {
@@ -388,28 +425,40 @@ export function evaluatePolicyGate(input: PolicyGateInput): PolicyGateResult {
     }
     if (after === null) continue;
 
-    if (CODE_FILE_RE.test(path) && !PACKAGE_JSON_RE.test(path)) {
-      // コメント系（移動は検出しないよう内容の多重集合で比較）
-      const bHits = before ? collectSuppressComments(path, before) : [];
-      const aHits = collectSuppressComments(path, after);
-      for (const h of newItems(bHits, aHits, (x) => `${x.kind}:${x.text}`)) {
-        if (h.kind === 'eslint-disable') add('PG-ESLINT-DISABLE', f.path, h.line, h.text, '新規の eslint-disable コメント。ルールを無効化せずコードを規約に合わせること');
-        else add('PG-TS-SUPPRESS', f.path, h.line, h.text, '新規の @ts-ignore / @ts-nocheck。型エラーを抑制せず修正すること');
+    // 検出器自身の例外・解析不能は成功として扱わない（fail-closed）
+    try {
+      if (CODE_FILE_RE.test(path) && !PACKAGE_JSON_RE.test(path)) {
+        const errors = syntaxErrors(path, after);
+        if (errors.length > 0) add('PG-UNPARSEABLE', f.path, Number(errors[0]?.split(':')[0]) || 1, errors.join(' | '), '構文エラーのため静的ポリシーを確定できない（判定不能）。コードを構文的に正しくすること');
+        // コメント系（移動は検出しないよう内容の多重集合で比較）。構文エラーがあっても可能な範囲で解析する
+        const bHits = before ? collectSuppressComments(path, before) : [];
+        const aHits = collectSuppressComments(path, after);
+        for (const h of newItems(bHits, aHits, (x) => `${x.kind}:${x.text}`)) {
+          if (h.kind === 'eslint-disable') add('PG-ESLINT-DISABLE', f.path, h.line, h.text, '新規の eslint-disable コメント。ルールを無効化せずコードを規約に合わせること');
+          else add('PG-TS-SUPPRESS', f.path, h.line, h.text, '新規の @ts-ignore / @ts-nocheck。型エラーを抑制せず修正すること');
+        }
+        if (TEST_FILE_RE.test(path)) {
+          const bSkips = before ? collectTestSkips(path, before) : [];
+          const aSkips = collectTestSkips(path, after);
+          for (const sk of newItems(bSkips, aSkips, (x) => x.text)) add('PG-TEST-SKIP', f.path, sk.line, sk.text, 'テストの skip / only / todo の追加');
+        }
+        if (ESLINT_CONFIG_RE.test(path)) for (const h of eslintRelaxations(path, before, after)) add('PG-ESLINT-RELAXED', f.path, h.line, h.text, 'ESLint 設定の緩和', h.severity);
+        if (TESTCONFIG_RE.test(path)) for (const h of testConfigRelaxations(path, before, after)) add('PG-TESTCONFIG-RELAXED', f.path, h.line, h.text, 'テスト設定の緩和', h.severity);
+      } else if (PACKAGE_JSON_RE.test(path)) {
+        // ルート直下の package.json だけ検証 scripts を見る（ワークスペースパッケージの scripts はプロファイル外）
+        if (!path.includes('/')) {
+          for (const h of verifyScriptChanges(before, after, required)) {
+            add('PG-VERIFY-SCRIPT', f.path, h.line, h.text, h.severity === 'warning' ? '検証コマンドの追加・強化（内容を確認）' : '必須検証コマンドの削除・無効化・変更', h.severity);
+          }
+        }
+      } else if (TSCONFIG_RE.test(path)) {
+        if (!parseJsonc(path, after)) add('PG-UNPARSEABLE', f.path, 1, 'tsconfig を JSON として解釈できない', '設定ファイルが解析不能（判定不能）');
+        for (const h of tsconfigRelaxations(path, before, after)) add('PG-TSCONFIG-RELAXED', f.path, h.line, h.text, 'TypeScript 設定の緩和', h.severity);
+      } else if (ESLINT_CONFIG_RE.test(path)) {
+        for (const h of eslintRelaxations(path, before, after)) add('PG-ESLINT-RELAXED', f.path, h.line, h.text, 'ESLint 設定の緩和', h.severity);
       }
-      if (TEST_FILE_RE.test(path)) {
-        const bSkips = before ? collectTestSkips(path, before) : [];
-        const aSkips = collectTestSkips(path, after);
-        for (const s of newItems(bSkips, aSkips, (x) => x.text)) add('PG-TEST-SKIP', f.path, s.line, s.text, 'テストの skip / only / todo の追加');
-      }
-      if (ESLINT_CONFIG_RE.test(path)) for (const h of eslintRelaxations(path, before, after)) add('PG-ESLINT-RELAXED', f.path, h.line, h.text, 'ESLint 設定の緩和');
-      if (TESTCONFIG_RE.test(path)) for (const h of testConfigRelaxations(path, before, after)) add('PG-TESTCONFIG-RELAXED', f.path, h.line, h.text, 'テスト設定の緩和');
-    } else if (PACKAGE_JSON_RE.test(path)) {
-      // ルート直下の package.json だけ検証 scripts を見る（ワークスペースパッケージの scripts はプロファイル外）
-      if (!path.includes('/')) for (const h of verifyScriptChanges(before, after, required)) add('PG-VERIFY-SCRIPT', f.path, h.line, h.text, '必須検証コマンドの削除・無効化・変更');
-    } else if (TSCONFIG_RE.test(path)) {
-      for (const h of tsconfigRelaxations(path, before, after)) add('PG-TSCONFIG-RELAXED', f.path, h.line, h.text, 'TypeScript 設定の緩和');
-    } else if (ESLINT_CONFIG_RE.test(path)) {
-      for (const h of eslintRelaxations(path, before, after)) add('PG-ESLINT-RELAXED', f.path, h.line, h.text, 'ESLint 設定の緩和');
+    } catch (err) {
+      add('PG-ANALYSIS-ERROR', f.path, 1, (err instanceof Error ? err.message : String(err)).slice(0, 200), 'ポリシー検出器が解析中に例外を起こした（判定不能）。人間が差分を確認すること');
     }
   }
   // package.json が削除された場合

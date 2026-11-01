@@ -92,7 +92,7 @@ describe('gap analyzer (SPEC §4.1)', () => {
     const c = (id: string, severity: 'blocking' | 'minor', description = `矛盾 ${id}`) => ({ id, kind: 'requirement_vs_project', severity, description, evidence: ['e1'], options: [{ value: 'a', label: 'A', consequence: 'ca' }, { value: 'b', label: 'B', consequence: 'cb' }], recommendation: 'a' });
     expect(analyzeContradictions({ nonsense: true }, []).ok).toBe(false);
     expect(analyzeContradictions({ contradictions: [{ id: 'x', kind: 'requirement_vs_project', severity: 'blocking', description: 'd', evidence: [], options: [{ value: 'a', label: 'A', consequence: 'c' }], recommendation: '' }] }, []).ok).toBe(false); // options < 2
-    const r = analyzeContradictions({ contradictions: [c('CONTRA-001', 'blocking'), c('CONTRA-002', 'minor'), c('CONTRA-003', 'blocking'), c('CONTRA-004', 'blocking', '矛盾 CONTRA-003')] }, [{ contradictionId: 'CONTRA-001', kind: 'requirement_vs_project', question: 'q', chosen: 'a', chosenLabel: 'A', consequence: 'ca', evidence: [], decidedAt: 't' }]);
+    const r = analyzeContradictions({ contradictions: [c('CONTRA-001', 'blocking'), c('CONTRA-002', 'minor'), c('CONTRA-003', 'blocking'), c('CONTRA-004', 'blocking', '矛盾 CONTRA-003')] }, [{ topicKey: 'CONTRA-001', contradictionId: 'CONTRA-001', source: 'contradiction', kind: 'requirement_vs_project', question: 'q', options: [], chosen: 'a', chosenLabel: 'A', rationale: 'r', consequence: 'ca', evidence: [], relatedRequirements: [], decidedAt: 't', history: [], supersededBy: null, status: 'active' }]);
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.blocking.map((x) => x.id)).toEqual(['CONTRA-003']); // 001 は決定済み、004 は 003 と同文で重複
@@ -101,8 +101,9 @@ describe('gap analyzer (SPEC §4.1)', () => {
     expect(qs[0]).toMatchObject({ id: 'CONTRA-CONTRA-003', round: 2, decisionImpact: 'blocking' });
     expect(qs[0]?.question).toContain('e1');
     expect(qs[0]?.options[0]?.label).toBe('A — ca');
-    const prompt = renderContradictionPrompt({ request: 'req', facts: [], digestText: '', askedQuestions: [], answers: [], prohibitedOperations: [], summary: 's', proposal: { title: 't', objective: 'o', requirements: ['r1'], outOfScope: [], approach: 'a', acceptanceCriteria: [{ id: 'AC-1', given: 'g', when: 'w', then: 't' }], openItems: [] }, decisions: [{ contradictionId: 'CONTRA-001', kind: 'requirement_vs_project', question: 'q', chosen: 'a', chosenLabel: 'A', consequence: 'ca', evidence: [], decidedAt: 't' }] });
-    expect(prompt).toContain('Decisions already made');
+    const prompt = renderContradictionPrompt({ request: 'req', facts: [], digestText: '', askedQuestions: [], answers: [], prohibitedOperations: [], summary: 's', proposal: { title: 't', objective: 'o', requirements: ['r1'], outOfScope: [], approach: 'a', acceptanceCriteria: [{ id: 'AC-1', given: 'g', when: 'w', then: 't' }], openItems: [] }, decisions: [{ topicKey: 'CONTRA-001', contradictionId: 'CONTRA-001', source: 'contradiction', kind: 'requirement_vs_project', question: 'q', options: [], chosen: 'a', chosenLabel: 'A', rationale: 'r', consequence: 'ca', evidence: [], relatedRequirements: [], decidedAt: 't', history: [], supersededBy: null, status: 'active' }] });
+    expect(prompt).toContain('Binding decisions');
+    expect(prompt).toContain('[contradiction:CONTRA-001]');
     expect(prompt).toContain('"r1"');
   });
 

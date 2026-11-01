@@ -329,7 +329,9 @@ export class RunEngine {
 
         // ---- IMPLEMENTING ----
         await transition('IMPLEMENTING');
-        await emit('builder.started', { round }, round);
+        await emit('builder.started', { round, hasFeedback: feedback !== null, feedbackKinds: feedback ? { verification: feedback.verificationFailures.length, review: feedback.reviewFindings.length, policy: feedback.policyFindings.length } : null }, round);
+        // Builder に渡したフィードバックを成果物として保存（指摘が渡ったことをログで確認できるようにする。v2.2）
+        if (feedback) await this.deps.recorder.saveArtifact(runId, round, 'feedback.json', JSON.stringify(feedback, null, 2));
         const builderLog: string[] = [];
         const builder = await this.deps.builder.implement({
           runId,
@@ -395,6 +397,8 @@ export class RunEngine {
         if (!gateResult.passed) {
           record.finishedAt = new Date(this.deps.now()).toISOString();
           await this.deps.recorder.saveRound(runId, record);
+          // v2.2: 明示的な POLICY_BLOCKED 状態を経て Builder に差し戻す（UI / ログで遷移を追える）
+          await transition('POLICY_BLOCKED');
           if (round >= maxRounds) {
             return await finish('NEEDS_HUMAN', 'POLICY_VIOLATION', `round ${round}: Policy Gate の未承認違反 ${gateResult.blocking.length} 件（${[...new Set(gateResult.blocking.map((x) => x.ruleId))].join(', ')}）、修正上限に到達`);
           }

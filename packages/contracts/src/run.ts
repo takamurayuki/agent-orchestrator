@@ -9,6 +9,8 @@ export const RUN_STATES = [
   'IMPLEMENTING',
   'VERIFYING',
   'REVIEWING',
+  /** Policy Gate の未承認違反で Builder に差し戻す直前の状態（v2.2。次のラウンドで IMPLEMENTING へ） */
+  'POLICY_BLOCKED',
   'COMPLETED',
   'NEEDS_HUMAN',
   'PRECHECK_FAILED',
@@ -83,7 +85,7 @@ export const PolicyViolationSchema = z.strictObject({
 export type PolicyViolation = z.infer<typeof PolicyViolationSchema>;
 
 /** Policy Gate（v2.1）の検出結果。AI レビューとは独立した静的チェック。approved はベースコミットの人間管理の例外に一致した場合のみ true */
-export const POLICY_RULE_IDS = ['PG-ESLINT-DISABLE', 'PG-TS-SUPPRESS', 'PG-TEST-SKIP', 'PG-TEST-DELETED', 'PG-VERIFY-SCRIPT', 'PG-TSCONFIG-RELAXED', 'PG-ESLINT-RELAXED', 'PG-TESTCONFIG-RELAXED'] as const;
+export const POLICY_RULE_IDS = ['PG-ESLINT-DISABLE', 'PG-TS-SUPPRESS', 'PG-TEST-SKIP', 'PG-TEST-DELETED', 'PG-VERIFY-SCRIPT', 'PG-TSCONFIG-RELAXED', 'PG-ESLINT-RELAXED', 'PG-TESTCONFIG-RELAXED', 'PG-UNPARSEABLE', 'PG-ANALYSIS-ERROR'] as const;
 export const PolicyFindingSchema = z.strictObject({
   ruleId: z.enum(POLICY_RULE_IDS),
   severity: z.enum(['blocking', 'warning']),

@@ -137,6 +137,9 @@ export class MockTransport implements Transport {
 
       if (back) {
         if (answeredRounds === 0) this.fail('INVALID_STATE', '戻れるラウンドがありません');
+        // v2.2: 取り消した回答の判断は retracted として履歴に残す
+        const retractedIds = new Set(draft.answers.filter((a) => a.round === answeredRounds).map((a) => a.questionId));
+        draft.decisions = draft.decisions.map((d) => (retractedIds.has(d.topicKey) && d.status === 'active' ? { ...d, status: 'retracted' as const } : d));
         draft.answers = draft.answers.filter((a) => a.round !== answeredRounds);
         draft.round = answeredRounds;
         draft.currentQuestions = QUESTION_ROUNDS[answeredRounds - 1] ?? [];
@@ -159,6 +162,32 @@ export class MockTransport implements Transport {
           return { questionId: q.id, round: roundNo, value, skipped: value === null, answeredAt: now };
         });
         draft.answers = [...draft.answers.filter((a) => a.round !== roundNo), ...recorded];
+        // v2.2 意思決定ログ（共通モデル）: 回答を interview 判断として記録。同じ質問の再回答は履歴に積む
+        for (const r of recorded) {
+          if (r.value === null) continue;
+          const q = current.find((x) => x.id === r.questionId)!;
+          const opt = q.options.find((o) => o.value === r.value);
+          const prev = draft.decisions.find((d) => d.topicKey === q.id);
+          const next = {
+            topicKey: q.id,
+            contradictionId: q.id,
+            source: 'interview' as const,
+            kind: 'other' as const,
+            question: q.question,
+            options: q.options.map((o) => ({ value: o.value, label: o.label })),
+            chosen: r.value,
+            chosenLabel: opt?.label ?? r.value,
+            rationale: opt ? `ユーザーが選択肢を選択（推奨: ${q.recommendation}）` : `ユーザーの自由入力（推奨: ${q.recommendation}）`,
+            consequence: opt ? `${opt.label} を前提に要件を確定する` : '自由入力の内容を前提に要件を確定する',
+            evidence: [],
+            relatedRequirements: [],
+            decidedAt: now,
+            history: prev ? [...prev.history, { chosen: prev.chosen, chosenLabel: prev.chosenLabel, decidedAt: prev.decidedAt, retracted: prev.status === 'retracted', note: prev.status === 'retracted' ? '「戻る」で取り消された判断' : '再回答で置き換えられた判断' }] : [],
+            supersededBy: null,
+            status: 'active' as const
+          };
+          draft.decisions = prev ? draft.decisions.map((d) => (d.topicKey === q.id ? next : d)) : [...draft.decisions, next];
+        }
         const nextRound = QUESTION_ROUNDS[roundNo];
         if (nextRound) {
           draft.round = roundNo + 1;

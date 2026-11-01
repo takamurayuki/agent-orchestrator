@@ -63,7 +63,9 @@
     REVIEWING: 'レビュー',
     COMPLETED: '完了'
   };
-  const stepIndex = $derived(run ? steps.indexOf(run.state as (typeof steps)[number]) : -1);
+  // POLICY_BLOCKED（v2.2）は「実装」ステップに差し戻された状態として表示する
+  const stepIndex = $derived(run ? steps.indexOf((run.state === 'POLICY_BLOCKED' ? 'IMPLEMENTING' : run.state) as (typeof steps)[number]) : -1);
+  const policyBlocked = $derived(run?.state === 'POLICY_BLOCKED');
 
   const yaml = $derived(app.approval?.taskYaml ?? app.draft?.taskYaml ?? null);
 
@@ -106,11 +108,14 @@
         {#each steps as step, i (step)}
           <li class:done={i < stepIndex || run.state === 'COMPLETED'} class:current={i === stepIndex && !terminal} aria-current={i === stepIndex && !terminal ? 'step' : undefined}>
             <span class="mark" aria-hidden="true">{i < stepIndex || run.state === 'COMPLETED' ? '✔' : i === stepIndex ? '▶' : '○'}</span>
-            {stepLabels[step]}
+            {stepLabels[step]}{#if step === 'IMPLEMENTING' && policyBlocked}（ポリシー違反で差し戻し中）{/if}
             {#if i === stepIndex && !terminal}<span class="sr-only">（現在）</span>{/if}
           </li>
         {/each}
       </ol>
+      {#if policyBlocked}
+        <p class="small" data-testid="policy-blocked-note">静的チェック（Policy Gate）が未承認の違反を検出したため、検証・レビューを行わず AI に修正を依頼しています。残りの試行回数内で解消されない場合は「要確認」で停止します。</p>
+      {/if}
       <div class="row">
         <button type="button" class="danger" onclick={() => void cancelRun()} disabled={terminal || app.busy !== null} data-testid="cancel-run">実行をキャンセル</button>
         {#if terminal}

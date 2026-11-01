@@ -1,14 +1,14 @@
 {
   "LIVE-01": {
     "status": "PASS",
-    "note": "2026-11-01 tests/e2e/live-pipeline.test.ts（RUN_LIVE_E2E=1、headless）: 専用サンプルリポジトリで依頼→ヒアリング（Claude Code）→承認→実装（Claude Code）→検証（pnpm install/typecheck/lint/test:run 全 exit 0）→レビュー（Codex approved）→ COMPLETED、1 ラウンド、3 分 24 秒。GUI 経由（tauri dev + 実 Runner、Playwright を WebView2 に CDP 接続）でも依頼入力→ヒアリング→同意→承認→Run→結果（COMPLETED）まで 2.5 分で完走。複数ラウンド: CORS オリジン判定シナリオで Claude Code → Codex（high 指摘）→ Claude Code（修正）→ Codex → Claude Code → Codex の 3 ラウンドを実測。各ラウンドで差分が変化し、ハッシュ一致・検証 PASS、上限到達で NEEDS_HUMAN / MAX_ROUNDS（自動承認なし）。"
+    "note": "2026-11-01 tests/e2e/live-pipeline.test.ts（RUN_LIVE_E2E=1、headless）: 専用サンプルリポジトリで依頼→ヒアリング（Claude Code）→承認→実装（Claude Code）→検証（pnpm install/typecheck/lint/test:run 全 exit 0）→レビュー（Codex approved）→ COMPLETED、1 ラウンド、3 分 24 秒。GUI 経由（tauri dev + 実 Runner、Playwright を WebView2 に CDP 接続）でも依頼入力→ヒアリング→同意→承認→Run→結果（COMPLETED）まで 2.5 分で完走。複数ラウンド: CORS オリジン判定シナリオで Claude Code → Codex（high 指摘）→ Claude Code（修正）→ Codex → Claude Code → Codex の 3 ラウンドを実測。各ラウンドで差分が変化し、ハッシュ一致・検証 PASS、上限到達で NEEDS_HUMAN / MAX_ROUNDS（自動承認なし）。 ／ v2.2（2026-11-01）再実行: 同テストを headless で再実行し PASS（COMPLETED、1 ラウンド、157 s、Builder 17.6 s、install/typecheck/lint/test:run すべて exit 0）。"
   },
   "LIVE-02": {
     "status": "PASS",
-    "note": "各 LIVE 実行で元リポジトリの HEAD と作業ツリーが不変、ワークスペースに remote が無いことを assert。egress プロキシのログで allowlist 外（oaiusercontent.com, ab.chatgpt.com, example.com）は 403。"
+    "note": "各 LIVE 実行で元リポジトリの HEAD と作業ツリーが不変、ワークスペースに remote が無いことを assert。egress プロキシのログで allowlist 外（oaiusercontent.com, ab.chatgpt.com, example.com）は 403。 ／ v2.2: 隔離・egress の実 Docker テスト 7 件（CI=1 RUN_DOCKER_TESTS=1）を再実行し PASS。GUI 経由の再実測は未実施（前回結果のまま）。"
   },
   "LIVE-03": {
     "status": "PASS",
-    "note": "NSIS インストーラ（Agent Orchestrator_0.1.0_x64-setup.exe、24 MB）を tauri build で作成。/S で一時ディレクトリにサイレントインストール → agent-orchestrator-desktop.exe（4.3 MB）+ 同梱サイドカー agent-orchestrator-runner.exe（Node SEA、91 MB）+ uninstall.exe。Node を PATH から外した環境（env -i）で起動し、同梱サイドカーが ready → GUI の environment.check / project.inspect が成功。サンドボックスイメージが無い構成では「✖ 実行不可：セットアップが必要です」と修正方法が表示され開始ボタンが無効。uninstall.exe /S で残存ファイル・レジストリ 0。コード署名は署名鍵が無いため未実施（docs/RELEASE.md に手順）。"
+    "note": "NSIS インストーラ（Agent Orchestrator_0.1.0_x64-setup.exe、24 MB）を tauri build で作成。/S で一時ディレクトリにサイレントインストール → agent-orchestrator-desktop.exe（4.3 MB）+ 同梱サイドカー agent-orchestrator-runner.exe（Node SEA、91 MB）+ uninstall.exe。Node を PATH から外した環境（env -i）で起動し、同梱サイドカーが ready → GUI の environment.check / project.inspect が成功。サンドボックスイメージが無い構成では「✖ 実行不可：セットアップが必要です」と修正方法が表示され開始ボタンが無効。uninstall.exe /S で残存ファイル・レジストリ 0。コード署名は署名鍵が無いため未実施（docs/RELEASE.md に手順）。 ／ v2.2: インストーラは再ビルド・再実測していない（前回結果のまま。サイドカー / Rust に変更なし、cargo check のみ）。"
   }
 }

@@ -15,6 +15,7 @@ const STATE_LABEL: Record<RunStatus['state'], string> = {
   IMPLEMENTING: '実装中',
   VERIFYING: '検証中',
   REVIEWING: 'レビュー中',
+  POLICY_BLOCKED: 'ポリシー違反で差し戻し中',
   COMPLETED: '完了（ゲート通過）',
   NEEDS_HUMAN: '要確認（人間の判断が必要）',
   PRECHECK_FAILED: '起動前検査失敗',

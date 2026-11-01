@@ -147,10 +147,18 @@
           <p class="small muted">回答のたびに再評価されます。確定事項・選択・推奨・未確定は分けて記録します。</p>
           <pre data-testid="draft-summary">{draft.summary}</pre>
           {#if draft.decisions.length > 0}
-            <h3>意思決定ログ（矛盾の解消）</h3>
+            <h3>意思決定ログ</h3>
+            <p class="small muted">質問への回答・矛盾の解消・承認前の修正を記録します。同じ事項の新しい判断が古い判断より優先されます。</p>
             <ul class="small" data-testid="decision-log">
-              {#each draft.decisions as d (d.contradictionId)}
-                <li><strong>{d.contradictionId}</strong>: {d.question} → <strong>{d.chosenLabel}</strong>（{d.consequence}）</li>
+              {#each draft.decisions as d (d.topicKey)}
+                <li class:muted={d.status !== 'active'}>
+                  <span class="badge">{d.source === 'interview' ? '質問' : d.source === 'contradiction' ? '矛盾' : '修正'}</span>
+                  <strong>{d.topicKey}</strong>: {d.question} → <strong>{d.chosenLabel}</strong>
+                  {#if d.status === 'retracted'}<span class="badge">取り消し</span>{:else if d.status === 'superseded'}<span class="badge">{d.supersededBy} で置き換え</span>{/if}
+                  {#if d.consequence}<span class="muted">（{d.consequence}）</span>{/if}
+                  {#if d.relatedRequirements.length > 0}<span class="muted"> 対象: {d.relatedRequirements.join(' / ')}</span>{/if}
+                  {#if d.history.length > 0}<span class="muted"> 履歴 {d.history.length} 件</span>{/if}
+                </li>
               {/each}
             </ul>
           {/if}

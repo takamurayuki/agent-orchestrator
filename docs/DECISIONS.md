@@ -190,3 +190,30 @@ SPEC.md を唯一の要件ベースラインとし、契約の曖昧さ・不整
 - egress プロキシは TLS を終端しないため、許可ホストに対する通信内容の検査はしない。
 - pnpm 以外のパッケージマネージャ用プロファイルは未提供（`node-pnpm` のみ）。
 - 実 CLI で `changes_requested` → 修正 → `approved` に収束するケースは未観測（3 ラウンド実測は上限到達で NEEDS_HUMAN）。
+
+## D-31 Policy Gate は TypeScript コンパイラ API だけで判定し、判定不能は不合格にする（v2.2）
+
+- **決定:** (1) ソースの解析は `ts.createSourceFile` のパーサ駆動（コメント範囲は全ノード・トークンの leading / trailing、テスト構文は AST、設定は `parseConfigFileTextToJson` / AST）に限定し、**正規表現によるソース解析への置換を禁止する**（ファイル名・script 文字列の分類など、ソース本文以外に限り regex を使う）。(2) 構文エラー（`parseDiagnostics`）のあるファイルは `PG-UNPARSEABLE`（blocking、「判定不能」）を出した上で、可能な範囲で解析を続ける。JSONC 設定が解釈できない場合も `PG-UNPARSEABLE`。(3) 検出器自身が例外を投げたファイルは `PG-ANALYSIS-ERROR`（blocking）とし、成功扱いにしない（fail-closed）。
+- **理由:** v2.1 で scanner ループの実装がテンプレートリテラル以降の行末コメントを取り逃がした（D-29 追記）。regex では文字列・正規表現リテラル・JSX テキストとコメントを区別できず、偽陽性・偽陰性の両方が出る。不完全なコードや検出器のバグで「検出 0 件」になると、それが「違反なし」と区別できないため、判定不能は明示して人間に渡す。
+- **検証:** `policy-gate.test.ts` v2.2 群 — テンプレートリテラル内、正規表現リテラル（`/\/\/ eslint-disable/`）、JSX 式コンテナ内のディレクティブ（検出）と JSX テキスト（非検出）、複数行ブロックコメント、CRLF の行番号、Unicode（日本語・絵文字・サロゲートペア）、構文エラーのあるコード（`PG-UNPARSEABLE` ＋可能な範囲の検出）、設定の JSON 破損。偽陽性チェックとして、このリポジトリの runner の全ソース・テスト（30 ファイル超）を「新規ファイル」として評価し 0 件を確認する回帰テストを常設。
+- **影響:** 構文エラーを含む差分は Builder に差し戻される（修正可能なフィードバック）。既存の JSDoc 風 `/** \n * eslint-disable */` は ESLint のディレクティブではないので検出しない。
+
+## D-32 意思決定ログを共通モデルに統一し、新しい判断を優先する（v2.2）
+
+- **決定:** `DecisionRecord` を `topicKey / source(interview | contradiction | revision) / kind / question / options / chosen / chosenLabel / rationale / consequence / evidence / relatedRequirements / decidedAt / history[] / supersededBy / status(active | retracted | superseded)` に統一する。通常質問の回答（source=interview、topicKey=質問 ID）、矛盾質問の回答（contradiction、topicKey=矛盾 ID、対象要件は保留中の素案から根拠文で照合）、承認前の要件修正（revision、topicKey=`revision:<field>`、旧値を consequence に記録）をすべて記録する。同じ topicKey の再判断は `history` に積み、「戻る」は削除ではなく `retracted`。素案生成・矛盾検出には `active` な判断だけを「拘束力のある判断（古い→新しい、後の判断が優先、revision は最新の明示的指示）」として渡し、再質問しない。
+- **矛盾する判断の検出:** (1) 同じ問い（正規化した質問文）に異なる回答、(2) 同じ対象要件集合に異なる判断は、新しい方を優先し古い方を `superseded`（`supersededBy` と履歴 note 付き）にする。(3) 判断同士の意味的な矛盾は矛盾検出モデルに報告させ（プロンプトで判断 ID を根拠に書かせる）、ユーザーの解消（CONTRA- 回答）が根拠で名指しした判断を superseded にする。解消した側が常に新しい判断として扱われ、古い判断が新しい明示的指示を上書きすることはない。
+- **理由:** v2.1 では矛盾回答しか記録されず、通常質問の判断や承認前の修正が YAML 再生成時に失われ得た。判断の出所・理由・履歴が無いと、後から「なぜこの要件になったか」を追えない。
+- **互換:** SQLite の `decisions` テーブルは変更せず（`contradiction_id` 列が topicKey を保持、`decision_version=2`）、v2.1 形式の行は読み出し時に持ち上げる。`decisions.json` は status と history を含む。
+- **検証:** `decisions.test.ts`（モデル・履歴・取り消し・矛盾判定・持ち上げ・拘束判断の文面）、`draft-service.test.ts`（通常回答の記録、戻る→retracted→再回答で履歴、revision の記録、拘束判断が propose に渡る、decisions.json、矛盾解消による superseded）。
+
+## D-33 Policy Gate の差し戻しは明示的な POLICY_BLOCKED 状態を経由し、フィードバックを成果物に残す（v2.2）
+
+- **決定:** 未承認 blocking があるラウンドは `IMPLEMENTING → POLICY_BLOCKED` に遷移してから次ラウンドの `IMPLEMENTING` に戻る（上限到達なら `POLICY_BLOCKED → NEEDS_HUMAN`）。Builder に渡したフィードバック（検証失敗・レビュー指摘・ポリシー違反）は `rounds/<n>/feedback.json` に保存し、`builder.started` イベントに `hasFeedback / feedbackKinds` を含める。
+- **理由:** v2.1 は差し戻しを `IMPLEMENTING` のまま続行していたため、UI・ログから「ポリシーで差し戻された」ことが読み取れず、Phase 2 の実測条件（指摘が Claude Code に渡ったことのログ証跡）を満たせなかった。
+- **影響:** 契約 `RUN_STATES` に `POLICY_BLOCKED` を追加（UI ラベル「ポリシー違反で差し戻し中」、実行画面では「実装」ステップに差し戻し表示）。`engine.test.ts` の遷移列を更新。
+
+## D-34 検証 scripts の変更は「無効化・弱体化＝blocking」「追加・強化＝warning」「判定不能＝blocking（人間の承認）」に分類する（v2.2）
+
+- **決定:** `PG-VERIFY-SCRIPT` は変更を機械的に分類する。削除・no-op 化（`echo` / `true` / 空）は blocking。旧コマンド全体が新コマンドに含まれ `&&` / `;` で別コマンドが追加された、または厳格化フラグ（`--max-warnings 0`、`--strict`、`--noEmit`、`--frozen-lockfile`、`--coverage`、`--run`、`--bail` 等）だけが追加された場合は「強化」として **warning**（完了は妨げないが内容を提示）。それ以外（`eslint .` → `eslint src`、`--passWithNoTests` の追加など）は強化と機械的に判断できないため blocking とし、人間がベースコミットの `.agent-orchestrator/policy.json` に例外を登録しない限り通さない。AI（Builder / Reviewer）はいかなる経路でも例外を承認できない。
+- **理由:** v2.1 は検証 scripts のあらゆる変更を blocking にしていたため、正当な強化（自リポジトリのコミット c91bd00）も差し戻された。一方で `eslint src` のような対象の縮小は「弱体化」だが文字列からは安全に判定できないので、安全側（人間の承認）に倒す。
+- **検証:** `policy-gate.test.ts` v2.2 Phase 4（分類・warning の内容提示・unknown は blocking・例外で通過）。

@@ -2,6 +2,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { ulid } from 'ulid';
 import type { Answer, AskedQuestion, Contradiction, DecisionRecord, DraftState, Fact, ProjectInfo, ReviewFinding, RoundRecord, RunEvent, RunStatus, Task, TaskProposal } from '@agent-orchestrator/contracts';
 import { transaction } from './db.js';
+import { upgradeDecision } from '../requirements/decisions.js';
 import { nowIso } from '../config.js';
 
 /** SQLite への型付きアクセス。IPC 層やサービス層は SQL を直接書かない。 */
@@ -114,15 +115,22 @@ export class Repository {
     return this.getDraft(id)!;
   }
 
-  // ---- decisions (意思決定ログ, v2.1) ----
+  // ---- decisions (意思決定ログ, v2.1 → v2.2 で共通モデル化) ----
+  /** topicKey ごとに 1 行（contradiction_id 列が topicKey を保持）。同じ topicKey は置き換え（履歴は decision_json 内の history） */
   addDecision(draftId: string, decision: DecisionRecord): void {
+    const existing = this.db.prepare('SELECT id FROM decisions WHERE draft_id = ? AND contradiction_id = ?').get(draftId, decision.topicKey) as { id: string } | undefined;
     this.db
-      .prepare('INSERT OR REPLACE INTO decisions (id, draft_id, contradiction_id, decision_json, decided_at) VALUES (?, ?, ?, ?, ?)')
-      .run(ulid(), draftId, decision.contradictionId, JSON.stringify(decision), decision.decidedAt);
+      .prepare('INSERT OR REPLACE INTO decisions (id, draft_id, contradiction_id, decision_json, decision_version, decided_at) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(existing?.id ?? ulid(), draftId, decision.topicKey, JSON.stringify(decision), 2, decision.decidedAt);
+  }
+
+  getDecision(draftId: string, topicKey: string): DecisionRecord | null {
+    const r = this.db.prepare('SELECT decision_json FROM decisions WHERE draft_id = ? AND contradiction_id = ?').get(draftId, topicKey) as { decision_json: string } | undefined;
+    return r ? upgradeDecision(JSON.parse(r.decision_json)) : null;
   }
 
   listDecisions(draftId: string): DecisionRecord[] {
-    return (this.db.prepare('SELECT decision_json FROM decisions WHERE draft_id = ? ORDER BY decided_at').all(draftId) as Array<{ decision_json: string }>).map((r) => JSON.parse(r.decision_json) as DecisionRecord);
+    return (this.db.prepare('SELECT decision_json FROM decisions WHERE draft_id = ? ORDER BY decided_at, id').all(draftId) as Array<{ decision_json: string }>).map((r) => upgradeDecision(JSON.parse(r.decision_json)));
   }
 
   removeDecision(draftId: string, contradictionId: string): void {

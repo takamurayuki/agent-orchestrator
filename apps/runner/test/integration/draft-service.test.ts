@@ -16,6 +16,7 @@ import { WorkspaceManager } from '../../src/workspace.js';
 class ScriptedModel implements InterviewModel {
   calls: Array<{ kind: 'interview' | 'propose' | 'contradictions'; round?: number }> = [];
   contradictionRequests: ContradictionRequest[] = [];
+  proposalRequests: ProposalRequest[] = [];
   constructor(
     private readonly rounds: Array<unknown | ((req: InterviewRequest) => unknown)>,
     private readonly proposal: unknown | ((req: ProposalRequest) => unknown) = defaultProposal,
@@ -40,6 +41,7 @@ class ScriptedModel implements InterviewModel {
   }
   async propose(req: ProposalRequest, _signal?: AbortSignal): Promise<ModelResult<unknown>> {
     this.calls.push({ kind: 'propose' });
+    this.proposalRequests.push(req);
     const value = typeof this.proposal === 'function' ? (this.proposal as (r: ProposalRequest) => unknown)(req) : this.proposal;
     return { ok: true, value, raw: JSON.stringify(value) };
   }
@@ -250,6 +252,93 @@ describe('DraftService conversation state machine (SPEC §5)', () => {
     expect(model.calls.map((c) => c.kind)).toEqual(['interview', 'propose', 'contradictions']);
   });
 
+  describe('v2.2 decision log (common model: interview / contradiction / revision)', () => {
+    it('interview answers are logged as decisions with source, options and rationale; going back retracts them and re-answering keeps history', async () => {
+      const model = new ScriptedModel([round1, round2, done]);
+      const svc = service(model);
+      let view = await svc.create({ projectPath: repo, request: 'ログイン機能を追加したい' });
+      view = await svc.answer({ draftId: view.id, answers: [{ questionId: 'Q-001', value: 'a', skipped: false }, { questionId: 'Q-002', value: '自由入力: Cookie セッション', skipped: false }, { questionId: 'Q-003', value: null, skipped: true }] });
+      const byTopic = Object.fromEntries(view.decisions.map((d) => [d.topicKey, d]));
+      expect(Object.keys(byTopic).sort()).toEqual(['Q-001', 'Q-002']); // スキップは判断ではない
+      expect(byTopic['Q-001']).toMatchObject({ source: 'interview', chosen: 'a', chosenLabel: 'A 案', status: 'active', options: [{ value: 'a', label: 'A 案' }, { value: 'b', label: 'B 案' }] });
+      expect(byTopic['Q-001']?.rationale).toContain('推奨: A 案を推奨');
+      expect(byTopic['Q-002']).toMatchObject({ chosen: '自由入力: Cookie セッション', chosenLabel: '自由入力: Cookie セッション' });
+      expect(byTopic['Q-002']?.rationale).toContain('自由入力');
+      // 戻る → retracted、再回答 → 履歴に取り消し分が残る
+      view = await svc.answer({ draftId: view.id, back: true });
+      expect(view.decisions.every((d) => d.status === 'retracted')).toBe(true);
+      view = await svc.answer({ draftId: view.id, answers: [{ questionId: 'Q-001', value: 'b', skipped: false }, { questionId: 'Q-002', value: 'a', skipped: false }, { questionId: 'Q-003', value: 'a', skipped: false }] });
+      const q1 = view.decisions.find((d) => d.topicKey === 'Q-001')!;
+      expect(q1).toMatchObject({ chosen: 'b', status: 'active' });
+      expect(q1.history).toHaveLength(1);
+      expect(q1.history[0]).toMatchObject({ chosen: 'a', retracted: true });
+      // 素案生成には active な判断だけが拘束条件として渡る
+      view = await svc.answer({ draftId: view.id, answers: answerAll(view) });
+      expect(view.state).toBe('AWAITING_APPROVAL');
+      const passed = model.proposalRequests.at(-1)!.decisions;
+      expect(passed.every((d) => d.status === 'active')).toBe(true);
+      expect(passed.map((d) => d.topicKey).sort()).toEqual(['Q-001', 'Q-002', 'Q-003', 'Q-004']);
+      // approve 時の decisions.json に履歴も含めて保存される
+      const approved = await svc.approve({ draftId: view.id, revision: view.revision, acknowledgeDataSharing: true });
+      const file = JSON.parse(readFileSync(join(approved.taskYamlPath, '..', 'decisions.json'), 'utf8')) as Array<{ topicKey: string; status: string; history: unknown[] }>;
+      expect(file.find((d) => d.topicKey === 'Q-001')).toMatchObject({ status: 'active', history: [{ chosen: 'a', retracted: true }] });
+    });
+
+    it('revising the summary logs a "revision" decision per edited field and it is passed as the latest binding instruction', async () => {
+      const model = new ScriptedModel([done], defaultProposal);
+      const svc = service(model);
+      let view = await svc.create({ projectPath: repo, request: 'x' });
+      expect(view.state).toBe('AWAITING_APPROVAL');
+      view = await svc.revise({ draftId: view.id, edits: { requirements: [...defaultProposal.requirements, 'ログイン失敗を 5 回で一時ロックする'], approach: '既存の規約に従う（ロックは DB カラムで管理）' } });
+      const rev = view.decisions.filter((d) => d.source === 'revision');
+      expect(rev.map((d) => d.topicKey).sort()).toEqual(['revision:approach', 'revision:requirements']);
+      const req = rev.find((d) => d.topicKey === 'revision:requirements')!;
+      expect(req).toMatchObject({ kind: 'scope', status: 'active', relatedRequirements: ['ログイン失敗を 5 回で一時ロックする'] });
+      expect(req.consequence).toContain('旧値');
+      expect(req.rationale).toContain('優先');
+      // 同じフィールドを再修正すると履歴が積まれる
+      view = await svc.revise({ draftId: view.id, edits: { approach: '既存の規約に従う（ロックは Redis）' } });
+      const ap = view.decisions.find((d) => d.topicKey === 'revision:approach')!;
+      expect(ap.history).toHaveLength(1);
+      expect(ap.history[0]).toMatchObject({ retracted: false });
+      expect(ap.chosenLabel).toContain('Redis');
+    });
+
+    it('a decision that contradicts an earlier one is detected (via contradiction detection) and the resolution supersedes the older decision, never the reverse', async () => {
+      // Q-001 で「A 案」を選んだ後、要件修正で approach を変更。矛盾検出モデルが判断同士の矛盾を報告し、ユーザーが解消する
+      const only1 = { facts: [], questions: [q('Q-001', 'blocking', 'セッション方式は？')], blockingQuestions: ['Q-001'], summary: 's' };
+      const contra = (req: ContradictionRequest) => {
+        const hasQ1 = req.decisions.some((d) => d.topicKey === 'Q-001' && d.status === 'active');
+        const hasRev = req.decisions.some((d) => d.topicKey === 'revision:approach');
+        if (hasQ1 && hasRev && !req.decisions.some((d) => d.topicKey === 'CONTRA-010')) {
+          return { contradictions: [{ id: 'CONTRA-010', kind: 'requirement_vs_requirement', severity: 'blocking', description: '判断 Q-001（A 案）と修正後の実装方針（Cookie）が矛盾する', evidence: ['Q-001: セッション方式は？ → A 案', 'revision:approach: Cookie セッションに変更'], options: [{ value: 'keep_q1', label: 'A 案を維持する', consequence: '実装方針を戻す' }, { value: 'keep_rev', label: '修正後の方針（Cookie）を採用する', consequence: 'Q-001 の判断を見直す' }], recommendation: 'keep_rev（最新の明示的指示）' }] };
+        }
+        return { contradictions: [] };
+      };
+      const model = new ScriptedModel([only1, done], defaultProposal, contra);
+      const svc = service(model);
+      let view = await svc.create({ projectPath: repo, request: 'x' });
+      view = await svc.answer({ draftId: view.id, answers: [{ questionId: 'Q-001', value: 'a', skipped: false }] });
+      expect(view.state).toBe('AWAITING_APPROVAL');
+      view = await svc.revise({ draftId: view.id, edits: { approach: 'Cookie セッションに変更' } });
+      expect(view.decisions.map((d) => d.topicKey).sort()).toEqual(['Q-001', 'revision:approach']);
+      // 修正だけでは機械的に矛盾と断定できない（両方 active）。次の再評価（戻る→再回答）で矛盾検出が判断同士の矛盾を報告する
+      view = await svc.answer({ draftId: view.id, back: true });
+      view = await svc.answer({ draftId: view.id, answers: [{ questionId: 'Q-001', value: 'a', skipped: false }] });
+      expect(view.state).toBe('ASKING');
+      expect(view.currentQuestions[0]?.id).toBe('CONTRA-CONTRA-010');
+      view = await svc.answer({ draftId: view.id, answers: [{ questionId: 'CONTRA-CONTRA-010', value: 'keep_rev', skipped: false }] });
+      expect(view.state).toBe('AWAITING_APPROVAL');
+      const byTopic = Object.fromEntries(view.decisions.map((d) => [d.topicKey, d]));
+      expect(byTopic['Q-001']).toMatchObject({ status: 'superseded', supersededBy: 'CONTRA-010' });
+      expect(byTopic['Q-001']?.history.at(-1)?.note).toContain('CONTRA-010');
+      expect(byTopic['revision:approach']).toMatchObject({ status: 'superseded', supersededBy: 'CONTRA-010' });
+      expect(byTopic['CONTRA-010']).toMatchObject({ status: 'active', chosen: 'keep_rev', source: 'contradiction' });
+      // 素案生成に渡る拘束条件は最新の判断だけ
+      expect(model.proposalRequests.at(-1)!.decisions.map((d) => d.topicKey)).toEqual(['CONTRA-010']);
+    });
+  });
+
   describe('v2.1 contradiction detection (cases 9 / 10)', () => {
     const conflict = {
       contradictions: [
@@ -298,7 +387,13 @@ describe('DraftService conversation state machine (SPEC §5)', () => {
       expect(view.state).toBe('AWAITING_APPROVAL');
       expect(view.contradictions).toEqual([]);
       expect(view.decisions).toHaveLength(1);
-      expect(view.decisions[0]).toMatchObject({ contradictionId: 'CONTRA-001', kind: 'requirement_vs_project', chosen: 'follow_lint', chosenLabel: 'プロジェクト規約に従い文字列連結で実装する' });
+      expect(view.decisions[0]).toMatchObject({ topicKey: 'CONTRA-001', contradictionId: 'CONTRA-001', source: 'contradiction', kind: 'requirement_vs_project', chosen: 'follow_lint', chosenLabel: 'プロジェクト規約に従い文字列連結で実装する', status: 'active', history: [], supersededBy: null });
+      expect(view.decisions[0]?.options.map((o) => o.value)).toEqual(['follow_lint', 'change_rule']);
+      expect(view.decisions[0]?.rationale).toContain('推奨: follow_lint');
+      // 素案（保留中）から対象要件が紐付く
+      expect(view.decisions[0]?.relatedRequirements).toEqual([]);
+      // 2 回目の素案生成には拘束力のある判断が渡る
+      expect(model.proposalRequests.at(-1)?.decisions.map((d) => d.topicKey)).toEqual(['CONTRA-001']);
       expect(view.taskYaml).toContain('schemaVersion: 2');
       // 2 回目の矛盾検出には決定が渡され、同じ矛盾は再提示されない
       expect(model.contradictionRequests[1]?.decisions.map((d) => d.contradictionId)).toEqual(['CONTRA-001']);
@@ -324,7 +419,13 @@ describe('DraftService conversation state machine (SPEC §5)', () => {
       expect(view.state).toBe('AWAITING_APPROVAL');
       expect(view.decisions).toHaveLength(1);
       view = await svc.answer({ draftId: view.id, back: true });
-      expect(view.decisions).toEqual([]);
+      // v2.2: 削除ではなく retracted として履歴に残る
+      expect(view.decisions.map((d) => d.status)).toEqual(['retracted']);
+      view = await svc.answer({ draftId: view.id, answers: [{ questionId: 'CONTRA-CONTRA-001', value: 'change_rule', skipped: false }] });
+      expect(view.state).toBe('AWAITING_APPROVAL');
+      expect(view.decisions).toHaveLength(1);
+      expect(view.decisions[0]).toMatchObject({ topicKey: 'CONTRA-001', chosen: 'change_rule', status: 'active' });
+      expect(view.decisions[0]?.history).toEqual([expect.objectContaining({ chosen: 'follow_lint', retracted: true })]);
     });
 
     it('minor-only contradictions do not block; they are appended to open items', async () => {
