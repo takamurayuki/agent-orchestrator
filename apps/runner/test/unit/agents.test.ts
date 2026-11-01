@@ -214,9 +214,12 @@ describe('reviewer sandbox: user namespaces for bubblewrap (regression from LIVE
     const step = sandbox.steps[0]!;
     expect(step.allowUserNamespaces).toBe(true);
     expect(step.workspace).toBe('ro');
-    const args = buildDockerRunArgs({ containerName: 'ao-R1-reviewer', image: 'img', step, volumes: { workspace: 'ws', aux: 'aux' }, network: 'net', limits: { cpus: 1, memory: '1g', pids: 10 }, proxyUrl: 'http://egress-proxy:3128' });
+    // プロファイル無しでは fail-closed
+    expect(() => buildDockerRunArgs({ containerName: 'ao-R1-reviewer', image: 'img', step, volumes: { workspace: 'ws', aux: 'aux' }, network: 'net', limits: { cpus: 1, memory: '1g', pids: 10 }, proxyUrl: null })).toThrow(/seccomp/);
+    const args = buildDockerRunArgs({ containerName: 'ao-R1-reviewer', image: 'img', step, volumes: { workspace: 'ws', aux: 'aux' }, network: 'net', limits: { cpus: 1, memory: '1g', pids: 10 }, proxyUrl: 'http://egress-proxy:3128', seccompProfilePath: 'C:/app-data/sandbox/seccomp-reviewer.json' });
     const joined = args.join(' ');
-    expect(joined).toContain('--security-opt seccomp=unconfined');
+    expect(joined).toContain('--security-opt seccomp=C:/app-data/sandbox/seccomp-reviewer.json');
+    expect(joined).not.toContain('unconfined');
     expect(joined).toContain('--cap-drop ALL');
     expect(joined).toContain('--security-opt no-new-privileges');
     expect(joined).toContain('target=/workspace,readonly');

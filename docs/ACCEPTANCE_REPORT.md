@@ -1,8 +1,8 @@
 # 受入テスト結果
 
-生成: 2026-11-01T05:04:19.307Z
+生成: 2026-11-01T05:30:42.688Z
 
-- Vitest: 156/157 passed
+- Vitest: 157/158 passed
 - Playwright: 13/13 passed
 - 集計: PASS 56 / FAIL 0 / NOT_RUN 0
 
@@ -68,9 +68,9 @@ PASS = 対応する自動テストがすべて成功。FAIL = 1 件以上失敗�
 
 | ID | シナリオ | 結果 | 備考 |
 |---|---|---|---|
-| LIVE-01 | 完全に隔離された小さなサンプルリポジトリで要件入力→ヒアリング→YAML承認→実装→検証→レビュー→結果表示を確認。 | **PASS** | 2026-11-01 tests/e2e/live-pipeline.test.ts（RUN_LIVE_E2E=1、headless）: 専用サンプルリポジトリで依頼→ヒアリング（Claude Code）→承認→実装（Claude Code）→検証（pnpm install/typecheck/lint/test:run 全 exit 0）→レビュー（Codex approved）→ COMPLETED、1 ラウンド、3 分 24 秒。初回実測で発見した不具合（--json-schema の $schema 拒否、.cmd/.exe の allowlist、Codex bubblewrap の user namespace 拒否）を修正し回帰テストを追加。GUI 経由（tauri dev + 実 Runner、Playwright を WebView2 に CDP 接続）でも、依頼入力→ヒアリング画面→同意→承認→Run 画面→結果画面（COMPLETED）まで 2.5 分で完走。この GUI 実測で FactsPanel の each_key_duplicate（実データで同じ key の facts）を発見・修正し、モックデータに重複 key を追加して回帰させた。Codex は修正後、ワークスペース内でコマンド実行（exec succeeded）して検査できることを確認。 |
-| LIVE-02 | 元リポジトリのHEAD/作業ツリー不変、リモートに副作用なし。 | **PASS** | 同テストで元リポジトリの HEAD と作業ツリーが不変、ワークスペースに remote が無いことを assert。egress プロキシのログで allowlist 外（oaiusercontent.com, ab.chatgpt.com, example.com）は 403。 |
-| LIVE-03 | Windows配布物がNodeの追加インストールなしでUI起動できる。WSL2/Docker/CLIが不足すると明示的に利用不可になる。 | **PASS** | scripts/build-sidecar.mjs（esbuild → Node SEA → postject）で runner を単一 exe 化し、tauri build --no-bundle のリリース exe と同じ場所に配置。Node を PATH から外した環境（env -i）で起動し、同梱サイドカーが ready → GUI の environment.check / project.inspect が成功（Playwright CDP smoke）。サンドボックスイメージ名を存在しないものにすると「✖ 実行不可：セットアップが必要です」と表示され開始ボタンが無効（LIVE_EXPECT_ENV_FAIL=1）。インストーラ（NSIS/MSI）の作成と署名は未実施。 |
+| LIVE-01 | 完全に隔離された小さなサンプルリポジトリで要件入力→ヒアリング→YAML承認→実装→検証→レビュー→結果表示を確認。 | **PASS** | 2026-11-01 tests/e2e/live-pipeline.test.ts（RUN_LIVE_E2E=1、headless）: 専用サンプルリポジトリで依頼→ヒアリング（Claude Code）→承認→実装（Claude Code）→検証（pnpm install/typecheck/lint/test:run 全 exit 0）→レビュー（Codex approved）→ COMPLETED、1 ラウンド、3 分 24 秒。GUI 経由（tauri dev + 実 Runner、Playwright を WebView2 に CDP 接続）でも依頼入力→ヒアリング→同意→承認→Run→結果（COMPLETED）まで 2.5 分で完走。複数ラウンド: CORS オリジン判定シナリオで Claude Code → Codex（high 指摘）→ Claude Code（修正）→ Codex → Claude Code → Codex の 3 ラウンドを実測。各ラウンドで差分が変化し、ハッシュ一致・検証 PASS、上限到達で NEEDS_HUMAN / MAX_ROUNDS（自動承認なし）。 |
+| LIVE-02 | 元リポジトリのHEAD/作業ツリー不変、リモートに副作用なし。 | **PASS** | 各 LIVE 実行で元リポジトリの HEAD と作業ツリーが不変、ワークスペースに remote が無いことを assert。egress プロキシのログで allowlist 外（oaiusercontent.com, ab.chatgpt.com, example.com）は 403。 |
+| LIVE-03 | Windows配布物がNodeの追加インストールなしでUI起動できる。WSL2/Docker/CLIが不足すると明示的に利用不可になる。 | **PASS** | NSIS インストーラ（Agent Orchestrator_0.1.0_x64-setup.exe、24 MB）を tauri build で作成。/S で一時ディレクトリにサイレントインストール → agent-orchestrator-desktop.exe（4.3 MB）+ 同梱サイドカー agent-orchestrator-runner.exe（Node SEA、91 MB）+ uninstall.exe。Node を PATH から外した環境（env -i）で起動し、同梱サイドカーが ready → GUI の environment.check / project.inspect が成功。サンドボックスイメージが無い構成では「✖ 実行不可：セットアップが必要です」と修正方法が表示され開始ボタンが無効。uninstall.exe /S で残存ファイル・レジストリ 0。コード署名は署名鍵が無いため未実施（docs/RELEASE.md に手順）。 |
 
 ## 対応テスト詳細
 

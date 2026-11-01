@@ -31,7 +31,9 @@ d('LIVE pipeline (real CLIs in sandbox)', () => {
     const env = await rt.environment.check();
     expect(env.canRun, JSON.stringify(env.checks.filter((c) => c.status !== 'ok'))).toBe(true);
 
-    let draft = await rt.drafts.create({ projectPath: sample, request: 'greet 関数に、名前が空文字のときは "Hello, stranger!" を返す仕様を追加したい。テストも追加してください。' });
+    // LIVE_REQUEST で依頼文を差し替えられる（Phase 3: レビュー指摘が出やすいシナリオの実測に使う）
+    const request = process.env.LIVE_REQUEST ?? 'greet 関数に、名前が空文字のときは "Hello, stranger!" を返す仕様を追加したい。テストも追加してください。';
+    let draft = await rt.drafts.create({ projectPath: sample, request });
     // 質問には選択肢の先頭（または固定の自由入力）で機械的に回答する
     for (let i = 0; i < 6 && draft.state === 'ASKING'; i++) {
       draft = await rt.drafts.answer({

@@ -108,10 +108,10 @@ pnpm acceptance                                      # ACCEPTANCE.md の ID ご�
 
 ```bash
 node scripts/build-sidecar.mjs                      # esbuild → Node SEA → postject。apps/desktop/src-tauri/binaries/ に配置
-pnpm --filter @agent-orchestrator/desktop exec tauri build --no-bundle   # target/release/agent-orchestrator-desktop.exe + agent-orchestrator-runner.exe
+pnpm --filter @agent-orchestrator/desktop exec tauri build   # NSIS: target/release/bundle/nsis/Agent Orchestrator_0.1.0_x64-setup.exe（サイドカー同梱）
 ```
 
-Rust は実行ファイルと同じディレクトリに `agent-orchestrator-runner(.exe)` があればそれをサイドカーとして使い、無ければ開発モード（ホストの `node apps/runner/dist/main.js`）にフォールバックします。配布 exe は Node が PATH に無い環境で起動・接続できることを実測済み（LIVE-03）。注入後の exe は元の署名が無効になるため、配布時は再署名が必要です。インストーラ（`tauri build` の NSIS/MSI）は未作成です。
+Rust は実行ファイルと同じディレクトリに `agent-orchestrator-runner(.exe)` があればそれをサイドカーとして使い、無ければ開発モード（ホストの `node apps/runner/dist/main.js`）にフォールバックします。インストーラを Node が PATH に無い環境へサイレントインストールして起動・接続できることを実測済み（LIVE-03）。コード署名は署名鍵が無いため未実施で、手順は `docs/RELEASE.md` を参照（未署名のまま配布しない）。
 
 ## LIVE 検証（実 CLI）
 
@@ -128,11 +128,11 @@ LIVE_CDP_URL=http://127.0.0.1:9333 LIVE_SAMPLE_REPO=<sample repo> pnpm --filter 
 
 ## 既知の制限・未検証事項
 
-- インストーラ（NSIS/MSI）の作成・署名は未実施。配布 exe + サイドカー exe の組での起動のみ実測。
+- コード署名は未実施（署名鍵なし）。NSIS インストーラの作成・サイレントインストール・起動・アンインストールは実測済み。
 - WSL2 ディストリビューション内で runner を動かす構成は未実測（Docker Desktop の WSL 連携が必要）。
 - egress プロキシは TLS を終端しないため、許可ホストへの通信内容は検査しない。
 - `pnpm install --ignore-scripts` のため postinstall が必要な依存を持つプロジェクトでは検証が失敗し得る（`NEEDS_HUMAN`）。
 - 検証プロファイルは `node-pnpm` のみ。
-- Reviewer（Codex）コンテナは bubblewrap を動かすため seccomp を外している（capability は全て落としたまま。`docs/DECISIONS.md` D-22）。
+- Reviewer（Codex）コンテナは bubblewrap を動かすため、Docker 既定 seccomp に `unshare/clone/mount/umount2/pivot_root` だけを追加したカスタムプロファイルを使う（capability は全て落としたまま。`docs/DECISIONS.md` D-22）。
 - Builder の試行上限は 3 回（初回 + 修正 2 回）。上限到達・判断不能はすべて人間へ戻す。
 - 「完了」はゲート通過の意味であり、バグが無いことやセキュリティの完全性を保証しない。最終反映はユーザーが手動で行う。

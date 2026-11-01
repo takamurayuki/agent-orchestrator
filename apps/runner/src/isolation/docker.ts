@@ -5,6 +5,7 @@ import { join, posix } from 'node:path';
 import type { RunnerConfig } from '../config.js';
 import { assertNoForbiddenFlags } from '../policy.js';
 import { runProcess, type ProcessResult, type ProcessRunner } from '../process-runner.js';
+import { REVIEWER_SECCOMP_PROFILE } from './seccomp-profile.js';
 import { CONTAINER_AUX, CONTAINER_HOME, CONTAINER_USER, CONTAINER_WORKSPACE, PROXY_ALIAS, PROXY_PORT, SYNC_EXCLUDES, type SandboxExecutor, type SandboxStep } from './types.js';
 
 /**
@@ -41,6 +42,8 @@ export function buildDockerRunArgs(input: {
   network: string | null;
   limits: RunnerConfig['limits'];
   proxyUrl: string | null;
+  /** allowUserNamespaces のステップに適用するカスタム seccomp プロファイル（ホスト上の絶対パス） */
+  seccompProfilePath?: string | null;
 }): string[] {
   const { step } = input;
   if (!NAME_RE.test(input.containerName)) throw new Error(`不正なコンテナ名: ${input.containerName}`);
@@ -48,7 +51,12 @@ export function buildDockerRunArgs(input: {
   const args = ['run', '--rm', '--init', '--name', input.containerName];
   args.push('--user', CONTAINER_USER);
   args.push('--cap-drop', 'ALL', '--security-opt', 'no-new-privileges');
-  if (step.allowUserNamespaces) args.push('--security-opt', 'seccomp=unconfined');
+  if (step.allowUserNamespaces) {
+    // 既定プロファイル + bubblewrap に必要な最小 syscall（unshare/clone/mount/umount2/pivot_root）だけを許可したカスタムプロファイル（D-22）。
+    // unconfined は使わない。プロファイルファイルが用意できていなければ fail-closed（例外）
+    if (!input.seccompProfilePath) throw new Error('Reviewer 用 seccomp プロファイルが用意されていない');
+    args.push('--security-opt', `seccomp=${input.seccompProfilePath}`);
+  }
   args.push('--pids-limit', String(input.limits.pids), '--cpus', String(input.limits.cpus), '--memory', input.limits.memory, '--memory-swap', input.limits.memory);
   args.push('--read-only');
   args.push('--tmpfs', '/tmp:rw,nosuid,size=512m');
@@ -83,6 +91,15 @@ export class DockerSandbox implements SandboxExecutor {
     this.run = options.run ?? runProcess;
     this.prefix = options.prefix ?? 'ao';
     this.tar = options.tarCommand ?? 'tar';
+  }
+
+  /** Reviewer 用 seccomp プロファイルを app-data に書き出し、そのパスを返す（内容は埋め込み定数。毎回上書きして改変を防ぐ）。 */
+  seccompProfilePath(): string {
+    const dir = join(this.options.config.appDataDir, 'sandbox');
+    mkdirSync(dir, { recursive: true });
+    const file = join(dir, 'seccomp-reviewer.json');
+    writeFileSync(file, JSON.stringify(REVIEWER_SECCOMP_PROFILE), 'utf8');
+    return file;
   }
 
   private docker(args: string[], timeoutMs = 60_000, extra: Partial<Parameters<ProcessRunner>[0]> = {}): Promise<ProcessResult> {
@@ -161,7 +178,8 @@ export class DockerSandbox implements SandboxExecutor {
       volumes: { workspace: names.workspace, aux: names.aux },
       network: step.network === 'egress' ? names.network : null,
       limits: this.options.config.limits,
-      proxyUrl: step.network === 'egress' ? `http://${PROXY_ALIAS}:${PROXY_PORT}` : null
+      proxyUrl: step.network === 'egress' ? `http://${PROXY_ALIAS}:${PROXY_PORT}` : null,
+      seccompProfilePath: step.allowUserNamespaces ? this.seccompProfilePath() : null
     });
     const secrets = [...(step.secrets ?? []), ...Object.entries(step.env).filter(([k]) => /TOKEN|KEY|SECRET|PASSWORD/i.test(k)).map(([, v]) => v)];
     let killed = false;

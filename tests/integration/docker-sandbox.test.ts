@@ -71,6 +71,21 @@ d('Docker sandbox (live docker)', () => {
     expect(await sandbox.getFile(runId, `${CONTAINER_AUX}/t/missing.txt`)).toBeNull();
   }, 300_000);
 
+  it('D-22: the reviewer seccomp profile lets bubblewrap create a user namespace, while the default profile does not', async () => {
+    const bwrap = '/usr/local/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/bwrap';
+    const cmd = ['sh', '-c', `${bwrap} --unshare-all --ro-bind / / --proc /proc --dev /dev --tmpfs /tmp --die-with-parent -- /bin/sh -c 'echo bwrap-ok' 2>&1`];
+    const blocked = await sandbox.exec(runId, { ...noAccess, name: 'bwrap-default', argv: cmd, timeoutMs: 60_000 });
+    expect(blocked.stdout).toContain('No permissions to create a new namespace');
+    const allowed = await sandbox.exec(runId, { ...noAccess, name: 'bwrap-profile', argv: cmd, timeoutMs: 60_000, allowUserNamespaces: true });
+    expect(allowed.stdout.trim()).toBe('bwrap-ok');
+    expect(allowed.args.join(' ')).toContain('seccomp-reviewer.json');
+    expect(allowed.args.join(' ')).not.toContain('unconfined');
+    // capability は落ちたまま: root 所有ファイルへの書込・hostname 変更は拒否される
+    const caps = await sandbox.exec(runId, { ...noAccess, name: 'bwrap-caps', argv: ['sh', '-c', 'hostname evil 2>&1; echo x > /etc/evil 2>&1; cat /proc/self/status | grep CapEff'], timeoutMs: 60_000, allowUserNamespaces: true });
+    expect(caps.stdout).toContain('CapEff:	0000000000000000');
+    expect(caps.stdout).toMatch(/Operation not permitted|Permission denied|Read-only file system|must be root/);
+  }, 180_000);
+
   it('EX-12: timeout kills the container', async () => {
     const started = Date.now();
     const r = await sandbox.exec(runId, { ...noAccess, name: 'sleep', argv: ['node', '-e', 'setInterval(()=>{},1000)'], timeoutMs: 3000 });

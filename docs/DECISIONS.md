@@ -121,16 +121,15 @@ SPEC.md を唯一の要件ベースラインとし、契約の曖昧さ・不整
 - **理由:** 利用者に Node のインストールを要求しない（SPEC §2）。`node:sqlite` が組み込みなのでネイティブモジュールの同梱が不要。
 - **影響・対処:** JSON Schema は `src/schemas.generated.ts` に埋め込み、実行時にファイルを読まない。SEA 内では `import.meta.url` が使えないため version はバンドル時に埋め込む。`node:sea` の `isSea()` でエントリ判定。注入後の exe は元の署名が無効になる（配布時は再署名が必要）。
 
-## D-22 Reviewer コンテナだけ seccomp を外し、Codex の bubblewrap サンドボックスを動かす
+## D-22 Reviewer コンテナは「Docker 既定 seccomp + bubblewrap 用の最小 syscall」のカスタムプロファイルで動かす
 
-- **決定:** Reviewer ステップ（Codex）のコンテナにのみ `--security-opt seccomp=unconfined` を付ける（`SandboxStep.allowUserNamespaces`）。`--cap-drop ALL`、`no-new-privileges`、非 root（1001）、read-only root、ワークスペースボリューム `readonly`、internal ネットワーク + egress プロキシ、レビュー前後のハッシュ照合はそのまま。Builder / Verifier / Requirements Agent には付けない。
-- **理由:** LIVE-01 の実測で、Codex `--sandbox read-only` が内部で使う bubblewrap が `bwrap: No permissions to create a new namespace` で失敗し、Codex はコマンドを 1 つも実行できず diff だけでレビューしていた（要約に「Direct workspace inspection was unavailable」）。Docker 既定の seccomp プロファイルは CAP_SYS_ADMIN 無しの `unshare`/`mount` を拒否するが、`seccomp=unconfined` ではカーネルの非特権 user namespace が使えることを `unshare -Ur true` で確認した。`--dangerously-bypass-approvals-and-sandbox` で Codex 側のサンドボックスを外す案は SEC-08（危険フラグ拒否）に反するため採らない。
-- **影響・対処:** seccomp を外しても capability は全て落ちており、書込先はワークスペース（:ro）と `/aux`、tmpfs のみ。レビューの読み取り能力が回復し、diff に現れない既存コードとの整合も検査できる。回帰テスト `agents.test.ts`（Reviewer のみに付与されること）。
+- **決定:** Reviewer ステップ（Codex）のコンテナにのみ `--security-opt seccomp=<app-data>/sandbox/seccomp-reviewer.json` を付ける（`SandboxStep.allowUserNamespaces`）。プロファイルは Docker 既定プロファイル（moby/profiles `seccomp/default.json`）に、CAP_SYS_ADMIN 無しでも許可する syscall を **`unshare`, `clone`（namespace フラグのマスク制限を解除）, `mount`, `umount2`, `pivot_root`** の 5 つだけ追加したもの。`scripts/derive-seccomp-profile.mjs` が候補 12 syscall を 1 つずつ外して実測し、この最小集合を導出した（`clone3`, `setns`, `chroot`, `sethostname`, `mount_setattr`, `open_tree`, `move_mount` は不要と判明）。`--cap-drop ALL`、`no-new-privileges`、非 root（1001）、read-only root、ワークスペースボリューム `readonly`、internal ネットワーク + egress プロキシ、レビュー前後のハッシュ照合はそのまま。Builder / Verifier / Requirements Agent には付けない。プロファイル内容は `isolation/seccomp-profile.ts` に埋め込み（SEA 同梱）、実行時に app-data へ毎回書き出す。プロファイルが無ければ fail-closed（例外）。
+- **理由:** LIVE-01 の実測で、Codex `--sandbox read-only` が内部で使う bubblewrap が `bwrap: No permissions to create a new namespace` で失敗し、Codex はコマンドを 1 つも実行できず diff だけでレビューしていた。原因は Docker 既定 seccomp が `unshare`/`mount`/`pivot_root` を CAP_SYS_ADMIN 保持時のみ許可し、`clone` の namespace フラグをマスクで拒否していること（カーネル自体は非特権 user namespace を許可: `max_user_namespaces=63941`）。当初の暫定策 `seccomp=unconfined` は Docker が既定で遮断する約 40 の syscall（`bpf`, `keyctl`, `kexec_load`, `ptrace` の一部等）も開けてしまうため、必要な 5 つだけに狭めた。`--dangerously-bypass-approvals-and-sandbox` で Codex 側のサンドボックスを外す案は SEC-08 に反するため採らない。
+- **残余リスク:** 非特権 user namespace 内で `mount`/`pivot_root` が使えるため、カーネルの userns 実装の脆弱性が攻撃面になる（capability は全て落ちており、書込先はワークスペース `:ro`、`/aux`、tmpfs のみ）。実測: `docker-sandbox.test.ts`（既定では bwrap 失敗、プロファイルでは成功、CapEff=0、hostname 変更不可）、実 Codex でコマンド実行成功・`/workspace` への書込は denied。
 
 ## 残課題（未実装 / 未実測）
 
-- インストーラ（NSIS/MSI）の作成と再署名（LIVE-03 は exe + サイドカー exe の組で実測済み）。
-- Reviewer コンテナの seccomp をカスタムプロファイル（既定 + user namespace 関連）に狭める。
+- コード署名（署名鍵が無いため未実施。NSIS インストーラは作成・実測済み）。
 - egress プロキシは TLS を終端しないため、許可ホストに対する通信内容の検査はしない。
 - pnpm 以外のパッケージマネージャ用プロファイルは未提供（`node-pnpm` のみ）。
-- 実 CLI での複数ラウンド（修正ループ）は未実測（2 回の LIVE 実行は 1 ラウンドで完了。ループ自体はモックで検証）。
+- 実 CLI で `changes_requested` → 修正 → `approved` に収束するケースは未観測（3 ラウンド実測は上限到達で NEEDS_HUMAN）。
