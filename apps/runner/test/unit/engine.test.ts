@@ -29,6 +29,19 @@ describe('RunEngine state machine (SPEC §6)', () => {
     // 状態遷移の順序
     const transitions = mock.recorder.events.filter((e) => e.type === 'run.state_changed').map((e) => e.payload.to);
     expect(transitions).toEqual(['PREFLIGHT', 'IMPLEMENTING', 'VERIFYING', 'REVIEWING', 'COMPLETED']);
+    expect(mock.calls.baseline).toBe(1);
+    expect(types).toContain('verify.baseline.finished');
+  });
+
+  it('D-23: baseline verification failure (repo broken before any change) → PRECHECK_FAILED without calling the Builder', async () => {
+    const mock = createMockDeps({ baseline: failVerification() });
+    const status = await runWith(mock);
+    expect(status.state).toBe('PRECHECK_FAILED');
+    expect(status.reasonDetail).toContain('ベースライン検証');
+    expect(status.reasonDetail).toContain('test:run');
+    expect(mock.calls.builder).toBe(0);
+    expect(mock.calls.reviewer).toBe(0);
+    expect(mock.recorder.artifacts.has('0/verify.baseline.json')).toBe(true);
   });
 
   it('EX-02: verification fails then fix succeeds → Builder 2, Reviewer 1', async () => {

@@ -60,6 +60,9 @@ describe('SandboxVerifier', () => {
     expect(sandbox.steps.map((s) => s.network)).toEqual(['egress', 'none', 'none', 'none']);
     // ワークスペースは /workspace に rw mount
     expect(sandbox.steps[0]?.workspace).toBe('rw');
+    // package.json#packageManager による pnpm のバージョン切替を抑止する（D-24: サンドボックス内でダウンロードできず install が失敗する）
+    expect(sandbox.steps[0]?.env.pnpm_config_manage_package_manager_versions).toBe('false');
+    expect(sandbox.steps[0]?.env.COREPACK_ENABLE_STRICT).toBe('0');
   });
 
   it('stops at the first failure and records remaining as missing', async () => {

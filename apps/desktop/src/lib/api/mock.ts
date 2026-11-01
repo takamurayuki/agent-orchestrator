@@ -311,6 +311,9 @@ export class MockTransport implements Transport {
         diffExcerpt: done || partial ? DIFF_EXCERPT : '',
         diffTruncated: false,
         changedFiles: done ? CHANGED_FILES : partial ? CHANGED_FILES.slice(0, 2) : [],
+        egress: done || partial
+          ? { available: true, allowed: 14, denied: 2, errors: 0, allowedHosts: ['api.anthropic.com', 'chatgpt.com', 'registry.npmjs.org'], deniedHosts: [{ host: 'ab.chatgpt.com', count: 2 }], errorHosts: [] }
+          : { available: false, allowed: 0, denied: 0, errors: 0, allowedHosts: [], deniedHosts: [], errorHosts: [] },
         openFindings: done
           ? [
               {

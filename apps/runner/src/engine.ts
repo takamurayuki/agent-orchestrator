@@ -272,6 +272,30 @@ export class RunEngine {
       await this.deps.transport.push(runId, workspace);
       await emit('workspace.synced', { direction: 'push' });
 
+      // ベースライン検証（Builder を呼ぶ前）: 未変更のリポジトリで検証プロファイルが通らない場合は環境/プロジェクト側の問題なので、
+      // AI を呼ばずに PRECHECK_FAILED で停止する（AI 起因の失敗と区別し、修正ラウンドの浪費を防ぐ。D-23）
+      checkCancelled();
+      if (!withinTime()) return await finish('NEEDS_HUMAN', 'TIMEOUT', `maxDurationSeconds(${task.limits.maxDurationSeconds}) を超過`);
+      await emit('verify.baseline.started', { profile: task.verificationProfile });
+      const baselineLog: string[] = [];
+      const baseline = await this.deps.verifier.verify({
+        runId,
+        round: 0,
+        workspace,
+        profile: task.verificationProfile,
+        timeoutMs: Math.min(task.limits.verificationTimeoutSeconds * 1000, remainingMs()),
+        signal,
+        onLog: (c) => baselineLog.push(c)
+      });
+      await this.deps.recorder.saveArtifact(runId, 0, 'verify.baseline.json', JSON.stringify(baseline, null, 2));
+      await this.deps.recorder.saveArtifact(runId, 0, 'verify.baseline.log', baselineLog.join(''));
+      const baselineFailed = baseline.commands.filter((c) => c.exitCode !== 0 || c.timedOut).map((c) => c.name);
+      await emit('verify.baseline.finished', { passed: baseline.passed, failed: baselineFailed, missing: baseline.missing });
+      checkCancelled();
+      if (!baseline.passed) {
+        return await finish('PRECHECK_FAILED', 'PRECHECK_FAILED', `ベースライン検証（変更前のリポジトリ）が失敗: ${[...baselineFailed, ...baseline.missing.map((m) => `${m}(未実行)`)].join(', ')}。プロジェクト側で typecheck / lint / test:run が通る状態にしてから再実行してください`);
+      }
+
       let feedback: BuilderFeedback | null = null;
       const maxRounds = task.limits.maxImplementationAttempts;
 

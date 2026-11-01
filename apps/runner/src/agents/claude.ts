@@ -161,7 +161,7 @@ export class ClaudeBuilder {
       workspace: 'rw',
       aux: 'none',
       workdir: CONTAINER_WORKSPACE,
-      env: { ...creds.env, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', DISABLE_AUTOUPDATER: '1', DISABLE_TELEMETRY: '1', pnpm_config_store_dir: '/workspace/.pnpm-store', pnpm_config_cache_dir: '/workspace/.pnpm-store/cache' },
+      env: { ...creds.env, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', DISABLE_AUTOUPDATER: '1', DISABLE_TELEMETRY: '1', pnpm_config_store_dir: '/workspace/.pnpm-store', pnpm_config_cache_dir: '/workspace/.pnpm-store/cache', pnpm_config_manage_package_manager_versions: 'false', COREPACK_ENABLE_STRICT: '0', COREPACK_ENABLE_AUTO_PIN: '0' },
       network: 'egress',
       timeoutMs: input.timeoutMs,
       signal: input.signal,

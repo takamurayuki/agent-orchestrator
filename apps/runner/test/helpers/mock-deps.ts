@@ -94,6 +94,8 @@ export interface MockOptions {
   preflight?: PreflightReport;
   builders?: Array<BuilderOutcome | ((input: BuilderInput) => Promise<BuilderOutcome>)>;
   verifications?: Array<VerificationResult | ((input: VerifierInput) => Promise<VerificationResult>)>;
+  /** ベースライン検証（round 0）の結果。省略時は成功 */
+  baseline?: VerificationResult;
   reviews?: Array<ReviewOutcome | ((input: ReviewerInput) => Promise<ReviewOutcome>)>;
   diffs?: DiffCapture[];
   hashes?: string[];
@@ -103,7 +105,7 @@ export interface MockOptions {
 
 export function createMockDeps(options: MockOptions = {}) {
   const recorder = new MemoryRecorder();
-  const calls = { builder: 0, verifier: 0, reviewer: 0, hash: 0, diff: 0, push: 0, pull: 0 };
+  const calls = { builder: 0, verifier: 0, reviewer: 0, hash: 0, diff: 0, push: 0, pull: 0, baseline: 0 };
   const builderInputs: BuilderInput[] = [];
   const reviewerInputs: ReviewerInput[] = [];
   const pick = <T, I>(list: Array<T | ((i: I) => Promise<T>)> | undefined, idx: number, input: I, fallback: T): Promise<T> => {
@@ -138,6 +140,11 @@ export function createMockDeps(options: MockOptions = {}) {
     verifier: {
       expectedCommands: () => ['install', 'typecheck', 'lint', 'test:run'],
       verify: async (input) => {
+        // round 0 はベースライン検証（Builder 前）。シナリオ配列は Builder 後の検証にだけ使う
+        if (input.round === 0) {
+          calls.baseline++;
+          return options.baseline ?? okVerification();
+        }
         const r = await pick(options.verifications, calls.verifier, input, okVerification());
         calls.verifier++;
         return r;

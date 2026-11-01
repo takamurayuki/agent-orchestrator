@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
-const dir = resolve(process.argv[2] ?? 'sample-repo');
+const dir = resolve(process.argv.slice(2).find((a) => !a.startsWith('--')) ?? 'sample-repo');
 mkdirSync(join(dir, 'src'), { recursive: true });
 mkdirSync(join(dir, 'test'), { recursive: true });
 writeFileSync(join(dir, 'package.json'), JSON.stringify({
@@ -14,8 +14,15 @@ writeFileSync(join(dir, 'package.json'), JSON.stringify({
   devDependencies: { typescript: '~5.9.3', vitest: '^4.1.12', eslint: '^9.39.0', '@eslint/js': '^9.39.0', 'typescript-eslint': '^8.72.1', '@types/node': '^22.20.5' }
 }, null, 2));
 writeFileSync(join(dir, 'tsconfig.json'), JSON.stringify({ compilerOptions: { target: 'ES2022', module: 'NodeNext', moduleResolution: 'NodeNext', strict: true, noEmit: true, types: ['node'] }, include: ['src', 'test'] }, null, 2));
-writeFileSync(join(dir, 'eslint.config.js'), "import js from '@eslint/js';\nimport tseslint from 'typescript-eslint';\nexport default tseslint.config(js.configs.recommended, ...tseslint.configs.recommended);\n");
-writeFileSync(join(dir, 'src', 'greet.ts'), "export function greet(name: string): string {\n  return `Hello, ${name}!`;\n}\n");
+// --strict-lint: no-console とテンプレートリテラル禁止を error にする（Phase 2「検証失敗 → 修正」シナリオ用）
+const strictLint = process.argv.includes('--strict-lint');
+writeFileSync(
+  join(dir, 'eslint.config.js'),
+  strictLint
+    ? "import js from '@eslint/js';\nimport tseslint from 'typescript-eslint';\nexport default tseslint.config(js.configs.recommended, ...tseslint.configs.recommended, { rules: { 'no-console': 'error', 'no-restricted-syntax': ['error', { selector: 'TemplateLiteral', message: 'プロジェクト規約: テンプレートリテラルは使わず文字列連結を使う' }] } });\n"
+    : "import js from '@eslint/js';\nimport tseslint from 'typescript-eslint';\nexport default tseslint.config(js.configs.recommended, ...tseslint.configs.recommended);\n"
+);
+writeFileSync(join(dir, 'src', 'greet.ts'), strictLint ? "export function greet(name: string): string {\n  return 'Hello, ' + name + '!';\n}\n" : "export function greet(name: string): string {\n  return `Hello, ${name}!`;\n}\n");
 writeFileSync(join(dir, 'test', 'greet.test.ts'), "import { expect, it } from 'vitest';\nimport { greet } from '../src/greet.js';\n\nit('greets', () => {\n  expect(greet('world')).toBe('Hello, world!');\n});\n");
 writeFileSync(join(dir, 'README.md'), '# sample-app\n\nA tiny TypeScript library used as the LIVE test target.\n');
 writeFileSync(join(dir, '.gitignore'), 'node_modules/\n');

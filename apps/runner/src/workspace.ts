@@ -42,8 +42,15 @@ export class WorkspaceManager {
     this.excludes = options.excludes ?? DEFAULT_EXCLUDES;
   }
 
-  private async git(cwd: string, args: string[], env: Record<string, string> = {}, timeoutMs = 120_000): Promise<string> {
-    const result = await this.run({ command: 'git', args, cwd, env: { GIT_TERMINAL_PROMPT: '0', GIT_CONFIG_NOSYSTEM: '1', ...env }, inheritEnv: true, timeoutMs, maxOutputBytes: this.maxDiffBytes * 2 });
+  /**
+   * git 実行。
+   * - ワークスペース操作（clone / diff / hash）はシステム設定を無視し（GIT_CONFIG_NOSYSTEM）、LF のまま扱う（Linux コンテナ向け）
+   * - 利用者の元リポジトリの状態確認（status / branch / HEAD）は利用者の設定を尊重する（Git for Windows の core.autocrlf=true は
+   *   システム設定にあり、無視すると CRLF の作業ツリーが全て「変更あり」に見えて preflight が誤って失敗する。D-25）
+   */
+  private async git(cwd: string, args: string[], env: Record<string, string> = {}, timeoutMs = 120_000, options: { userConfig?: boolean } = {}): Promise<string> {
+    const base: Record<string, string> = options.userConfig ? { GIT_TERMINAL_PROMPT: '0' } : { GIT_TERMINAL_PROMPT: '0', GIT_CONFIG_NOSYSTEM: '1' };
+    const result = await this.run({ command: 'git', args, cwd, env: { ...base, ...env }, inheritEnv: true, timeoutMs, maxOutputBytes: this.maxDiffBytes * 2 });
     if (result.spawnError) throw new GitError(`git を起動できない: ${result.spawnError}`, '');
     if (result.exitCode !== 0) throw new GitError(`git ${args.slice(0, 2).join(' ')} が失敗 (exit ${result.exitCode}${result.timedOut ? ', timeout' : ''}): ${result.stderr.trim().slice(0, 500)}`, result.stderr);
     return result.stdout;
@@ -60,16 +67,17 @@ export class WorkspaceManager {
   }
 
   async currentBranch(repo: string): Promise<string | null> {
-    const out = (await this.git(repo, ['rev-parse', '--abbrev-ref', 'HEAD'])).trim();
+    const out = (await this.git(repo, ['rev-parse', '--abbrev-ref', 'HEAD'], {}, 120_000, { userConfig: true })).trim();
     return out === 'HEAD' ? null : out;
   }
 
   async headSha(repo: string): Promise<string> {
-    return (await this.git(repo, ['rev-parse', 'HEAD'])).trim();
+    return (await this.git(repo, ['rev-parse', 'HEAD'], {}, 120_000, { userConfig: true })).trim();
   }
 
+  /** 利用者のリポジトリに未コミットの変更が無いか（利用者の git 設定で判定。D-25） */
   async isClean(repo: string): Promise<boolean> {
-    return (await this.git(repo, ['status', '--porcelain'])).trim() === '';
+    return (await this.git(repo, ['status', '--porcelain'], {}, 120_000, { userConfig: true })).trim() === '';
   }
 
   async resolveBaseSha(repository: string, baseRef: string): Promise<string> {

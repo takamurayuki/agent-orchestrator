@@ -172,6 +172,19 @@ export const RunListParams = z.strictObject({ limit: z.number().int().min(1).max
 export const RunListResultSchema = z.strictObject({ runs: z.array(RunStatusSchema) });
 
 export const RunReportParams = z.strictObject({ runId: z.string().min(1) });
+export const EgressSummarySchema = z.strictObject({
+  available: z.boolean(),
+  /** allowlist 内への通常の AI/レジストリ通信 */
+  allowed: z.number().int().min(0),
+  /** allowlist 外で拒否した接続 */
+  denied: z.number().int().min(0),
+  /** 許可先への接続エラー（ネットワーク障害など） */
+  errors: z.number().int().min(0),
+  allowedHosts: z.array(z.string()),
+  deniedHosts: z.array(z.strictObject({ host: z.string(), count: z.number().int().min(0) })),
+  errorHosts: z.array(z.string())
+});
+export type EgressSummary = z.infer<typeof EgressSummarySchema>;
 export const RunReportResultSchema = z.strictObject({
   run: RunStatusSchema,
   reportMarkdown: z.string(),
@@ -191,7 +204,9 @@ export const RunReportResultSchema = z.strictObject({
   ),
   requirementsUnverified: z.array(z.string()),
   reportPath: z.string(),
-  worktreePath: z.string().nullable()
+  worktreePath: z.string().nullable(),
+  /** egress プロキシのログ集計（ホスト名のみ。認証情報・URL パスは含まない）。ログが無い Run では available=false */
+  egress: EgressSummarySchema
 });
 export type RunReportResult = z.infer<typeof RunReportResultSchema>;
 

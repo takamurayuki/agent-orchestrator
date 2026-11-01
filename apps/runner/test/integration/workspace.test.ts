@@ -92,6 +92,26 @@ describe('WorkspaceManager (git)', () => {
   });
 });
 
+describe('WorkspaceManager honours the user git config for repo status (D-25, dogfood regression)', () => {
+  it('a clean checkout under system core.autocrlf=true is reported clean', async () => {
+    const sysConfig = join(root, 'system-gitconfig');
+    writeFileSync(sysConfig, '[core]\n\tautocrlf = true\n');
+    const prev = process.env.GIT_CONFIG_SYSTEM;
+    process.env.GIT_CONFIG_SYSTEM = sysConfig;
+    try {
+      // autocrlf=true のもとで checkout し直す（作業ツリーは CRLF、index は LF）
+      execFileSync('git', ['rm', '-rq', '--cached', '.'], { cwd: repo, env: { ...process.env } });
+      execFileSync('git', ['reset', '-q', '--hard'], { cwd: repo, env: { ...process.env } });
+      expect(execFileSync('git', ['status', '--porcelain'], { cwd: repo, encoding: 'utf8', env: { ...process.env } }).trim()).toBe('');
+      expect(await wm.isClean(repo)).toBe(true);
+      expect(await wm.currentBranch(repo)).toBe('main');
+    } finally {
+      if (prev === undefined) delete process.env.GIT_CONFIG_SYSTEM;
+      else process.env.GIT_CONFIG_SYSTEM = prev;
+    }
+  });
+});
+
 describe('WorkspaceManager git excludes (regression from LIVE GUI run)', () => {
   it('ignores container-side stores so the reviewer does not see them as untracked', async () => {
     const sha = await wm.resolveBaseSha(repo, 'main');

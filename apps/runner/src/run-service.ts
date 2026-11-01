@@ -1,7 +1,7 @@
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ulid } from 'ulid';
-import { resolveTask, type RunEvent, type RunReportResult, type RunStatus, type RunStatusResult } from '@agent-orchestrator/contracts';
+import { resolveTask, type EgressSummary, type RunEvent, type RunReportResult, type RunStatus, type RunStatusResult } from '@agent-orchestrator/contracts';
 import { nowIso } from './config.js';
 import { NEXT_ACTIONS, RunEngine, type ApprovedTaskSnapshot, type EngineDeps } from './engine.js';
 import { excerpt, maskSecrets } from './masking.js';
@@ -17,6 +17,43 @@ import type { Repository } from './storage/repository.js';
  * - 承認済み task（approved_tasks）以外は実行しない
  * - 起動時復旧: 実行中のまま残っている Run を INTERRUPTED として提示する（AUD-03）。自動再開はしない
  */
+/** egress.jsonl（プロキシの allow/deny/error 行）を UI 表示用に集計する。ホスト名以外は含めない。 */
+export function summarizeEgress(path: string): EgressSummary {
+  const empty: EgressSummary = { available: false, allowed: 0, denied: 0, errors: 0, allowedHosts: [], deniedHosts: [], errorHosts: [] };
+  if (!existsSync(path)) return empty;
+  const allowed = new Set<string>();
+  const denied = new Map<string, number>();
+  const errors = new Set<string>();
+  let counts = { allowed: 0, denied: 0, errors: 0 };
+  for (const line of readFileSync(path, 'utf8').split('\n')) {
+    if (!line.trim().startsWith('{')) continue;
+    let rec: { action?: string; host?: string };
+    try {
+      rec = JSON.parse(line) as { action?: string; host?: string };
+    } catch {
+      continue;
+    }
+    const host = String(rec.host ?? '').toLowerCase();
+    if (rec.action === 'allow') {
+      counts = { ...counts, allowed: counts.allowed + 1 };
+      if (host) allowed.add(host);
+    } else if (rec.action === 'deny') {
+      counts = { ...counts, denied: counts.denied + 1 };
+      if (host) denied.set(host, (denied.get(host) ?? 0) + 1);
+    } else if (rec.action === 'error') {
+      counts = { ...counts, errors: counts.errors + 1 };
+      if (host) errors.add(host);
+    }
+  }
+  return {
+    available: true,
+    ...counts,
+    allowedHosts: [...allowed].sort(),
+    deniedHosts: [...denied.entries()].map(([host, count]) => ({ host, count })).sort((a, b) => b.count - a.count),
+    errorHosts: [...errors].sort()
+  };
+}
+
 export class RunServiceError extends Error {
   constructor(
     readonly code: 'NOT_FOUND' | 'RUN_IN_PROGRESS' | 'TASK_NOT_APPROVED' | 'VALIDATION_FAILED' | 'INVALID_STATE',
@@ -96,6 +133,7 @@ export class RunService {
         return status;
       })
       .finally(async () => {
+        await this.saveEgressLog(runId).catch(() => undefined);
         await this.deps.sandbox.cleanup(runId).catch(() => undefined);
         if (this.active?.runId === runId) this.active = null;
       });
@@ -166,8 +204,18 @@ export class RunService {
       openFindings,
       requirementsUnverified: lastReview?.requirementsUnverified ?? [],
       reportPath,
-      worktreePath: run.worktreePath
+      worktreePath: run.worktreePath,
+      egress: summarizeEgress(join(run.runDir, 'egress.jsonl'))
     };
+  }
+
+  /** egress プロキシの allow/deny ログを runs/<runId>/egress.jsonl に保存する（ホスト名とポートのみ。認証情報や URL パスは含まない）。 */
+  private async saveEgressLog(runId: string): Promise<void> {
+    const text = await this.deps.sandbox.egressLog(runId);
+    const lines = text.split('\n').filter((l) => l.trim().startsWith('{'));
+    const runDir = join(this.deps.runsDir, runId);
+    if (!existsSync(runDir)) return;
+    writeFileSync(join(runDir, 'egress.jsonl'), maskSecrets(lines.join('\n')) + (lines.length ? '\n' : ''), 'utf8');
   }
 
   private async writeReport(status: RunStatus): Promise<void> {

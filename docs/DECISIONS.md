@@ -123,9 +123,27 @@ SPEC.md を唯一の要件ベースラインとし、契約の曖昧さ・不整
 
 ## D-22 Reviewer コンテナは「Docker 既定 seccomp + bubblewrap 用の最小 syscall」のカスタムプロファイルで動かす
 
-- **決定:** Reviewer ステップ（Codex）のコンテナにのみ `--security-opt seccomp=<app-data>/sandbox/seccomp-reviewer.json` を付ける（`SandboxStep.allowUserNamespaces`）。プロファイルは Docker 既定プロファイル（moby/profiles `seccomp/default.json`）に、CAP_SYS_ADMIN 無しでも許可する syscall を **`unshare`, `clone`（namespace フラグのマスク制限を解除）, `mount`, `umount2`, `pivot_root`** の 5 つだけ追加したもの。`scripts/derive-seccomp-profile.mjs` が候補 12 syscall を 1 つずつ外して実測し、この最小集合を導出した（`clone3`, `setns`, `chroot`, `sethostname`, `mount_setattr`, `open_tree`, `move_mount` は不要と判明）。`--cap-drop ALL`、`no-new-privileges`、非 root（1001）、read-only root、ワークスペースボリューム `readonly`、internal ネットワーク + egress プロキシ、レビュー前後のハッシュ照合はそのまま。Builder / Verifier / Requirements Agent には付けない。プロファイル内容は `isolation/seccomp-profile.ts` に埋め込み（SEA 同梱）、実行時に app-data へ毎回書き出す。プロファイルが無ければ fail-closed（例外）。
+- **決定:** Reviewer ステップ（Codex）のコンテナにのみ `--security-opt seccomp=<app-data>/sandbox/seccomp-reviewer.json` を付ける（`SandboxStep.allowUserNamespaces`）。プロファイルは Docker 既定プロファイル（moby/profiles `seccomp/default.json`）に、CAP_SYS_ADMIN 無しでも許可する syscall を **`unshare`, `clone`, `mount`, `umount2`, `pivot_root`** の 5 つだけ追加したもの。さらに引数で絞る: `clone` は既定の「namespace フラグ無し」許可を残したまま、追加許可は **`CLONE_NEWUSER` を含む呼び出しのみ**（`SCMP_CMP_MASKED_EQ`）、`unshare` は **namespace フラグ（NEWUSER/NEWNS/NEWPID/NEWIPC/NEWUTS/NEWNET/NEWCGROUP）以外のビットが立っていない呼び出しのみ**。`mount` / `umount2` / `pivot_root` の引数はポインタなので seccomp では絞れない。`scripts/derive-seccomp-profile.mjs` が候補 12 syscall を 1 つずつ外して実測し、この最小集合を導出した（`clone3`, `setns`, `chroot`, `sethostname`, `mount_setattr`, `open_tree`, `move_mount` は不要と判明）。`--cap-drop ALL`、`no-new-privileges`、非 root（1001）、read-only root、ワークスペースボリューム `readonly`、internal ネットワーク + egress プロキシ、レビュー前後のハッシュ照合はそのまま。Builder / Verifier / Requirements Agent には付けない。プロファイル内容は `isolation/seccomp-profile.ts` に埋め込み（SEA 同梱）、実行時に app-data へ毎回書き出す。プロファイルが無ければ fail-closed（例外）。
 - **理由:** LIVE-01 の実測で、Codex `--sandbox read-only` が内部で使う bubblewrap が `bwrap: No permissions to create a new namespace` で失敗し、Codex はコマンドを 1 つも実行できず diff だけでレビューしていた。原因は Docker 既定 seccomp が `unshare`/`mount`/`pivot_root` を CAP_SYS_ADMIN 保持時のみ許可し、`clone` の namespace フラグをマスクで拒否していること（カーネル自体は非特権 user namespace を許可: `max_user_namespaces=63941`）。当初の暫定策 `seccomp=unconfined` は Docker が既定で遮断する約 40 の syscall（`bpf`, `keyctl`, `kexec_load`, `ptrace` の一部等）も開けてしまうため、必要な 5 つだけに狭めた。`--dangerously-bypass-approvals-and-sandbox` で Codex 側のサンドボックスを外す案は SEC-08 に反するため採らない。
 - **残余リスク:** 非特権 user namespace 内で `mount`/`pivot_root` が使えるため、カーネルの userns 実装の脆弱性が攻撃面になる（capability は全て落ちており、書込先はワークスペース `:ro`、`/aux`、tmpfs のみ）。実測: `docker-sandbox.test.ts`（既定では bwrap 失敗、プロファイルでは成功、CapEff=0、hostname 変更不可）、実 Codex でコマンド実行成功・`/workspace` への書込は denied。
+
+## D-23 Builder 実行前に「ベースライン検証」を行う
+
+- **決定:** ワークスペース作成・同期の直後、Builder を呼ぶ前に検証プロファイル（install / typecheck / lint / test:run）を未変更のリポジトリに対して実行する（`verify.baseline.*` イベント、`rounds/0/verify.baseline.{json,log}`）。失敗したら `PRECHECK_FAILED`（理由にコマンド名を列挙）で停止し、AI を一度も呼ばない。
+- **理由:** ドッグフーディングで、ネイティブ依存（postinstall が必要）や `prisma generate`（egress allowlist 外へのダウンロード）を含むプロジェクトは変更の有無に関係なく検証が失敗することが分かった。ベースラインを取らないと、AI の実装が原因なのか環境が原因なのか区別できず、修正ラウンド（最大 3 回分の Builder / Reviewer 費用）を浪費する。
+- **影響・対処:** Run の所要時間が検証 1 回分（install 含む）増える。ベースライン失敗はプロジェクト側の修正（scripts、依存、allowlist 設定）を促すメッセージを出す。回帰テスト `engine.test.ts`（ベースライン失敗で Builder 0 回）。
+
+## D-24 サンドボックス内の pnpm はバージョン切替を行わない
+
+- **決定:** Verifier / Builder のコンテナ環境に `pnpm_config_manage_package_manager_versions=false`、`COREPACK_ENABLE_STRICT=0`、`COREPACK_ENABLE_AUTO_PIN=0` を設定し、イメージにピン留めした pnpm（12.9.1）をそのまま使う。
+- **理由:** ドッグフーディング（batontime）で `package.json#packageManager: pnpm@9.12.0` を持つプロジェクトの `pnpm install` が、指定版のダウンロード（ホームは tmpfs、egress は allowlist）に失敗して `ERR_PNPM_ENGINE_BIN_MISSING` となり、ベースライン検証で停止した。
+- **影響・対処:** プロジェクトが要求する pnpm 版と異なる版で lockfile を解釈する（lockfileVersion 9 系は互換）。非互換なら install が失敗し PRECHECK_FAILED で報告される。回帰テスト `verification.test.ts`。
+
+## D-25 利用者リポジトリの状態確認は利用者の git 設定で行う
+
+- **決定:** `isClean` / `currentBranch` / `headSha` は `GIT_CONFIG_NOSYSTEM` を付けずに実行する（ワークスペースの clone / diff / hash は従来どおりシステム設定を無視して LF のまま扱う）。
+- **理由:** Git for Windows は `core.autocrlf=true` をシステム設定に持つ。システム設定を無視して `git status` を実行すると、CRLF でチェックアウトされた作業ツリーの全ファイルが「変更あり」に見え、preflight の「Git clean」が誤って失敗する（ドッグフーディング temporaid で実測。利用者側の `git status` はクリーン）。
+- **影響・対処:** 利用者に見えている状態と一致する。回帰テスト `workspace.test.ts`（`GIT_CONFIG_SYSTEM` で autocrlf=true を与えても clean）。
 
 ## 残課題（未実装 / 未実測）
 

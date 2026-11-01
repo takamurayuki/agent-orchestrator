@@ -51,8 +51,9 @@ export class FakeSandbox implements SandboxExecutor {
   async getFile(_runId: string, containerPath: string): Promise<string | null> {
     return this.files.get(containerPath) ?? null;
   }
+  egressLines: string[] = [];
   async egressLog(): Promise<string> {
-    return '';
+    return this.egressLines.join('\n');
   }
 
   async cleanup(runId: string): Promise<void> {

@@ -35,7 +35,7 @@ export class SandboxVerifier {
         aux: 'none',
         workdir: CONTAINER_WORKSPACE,
         // pnpm store はワークスペースボリューム内（tmpfs の /tmp に大量書込しない。同期からは除外される）
-        env: { CI: '1', FORCE_COLOR: '0', NODE_OPTIONS: '--max-old-space-size=2048', pnpm_config_store_dir: '/workspace/.pnpm-store', pnpm_config_cache_dir: '/workspace/.pnpm-store/cache' },
+        env: { CI: '1', FORCE_COLOR: '0', NODE_OPTIONS: '--max-old-space-size=2048', pnpm_config_store_dir: '/workspace/.pnpm-store', pnpm_config_cache_dir: '/workspace/.pnpm-store/cache', pnpm_config_manage_package_manager_versions: 'false', COREPACK_ENABLE_STRICT: '0', COREPACK_ENABLE_AUTO_PIN: '0' },
         network: cmd.network,
         timeoutMs: perCommandTimeout,
         signal: input.signal,

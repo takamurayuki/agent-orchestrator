@@ -46,6 +46,14 @@ describe('RunService', () => {
   it('runs an approved task to COMPLETED, writes report.md, and exposes status/events/report [EX-01][AUD-04][AUD-05]', async () => {
     const approved = approveTask();
     const { service, sandbox, events } = build();
+    sandbox.egressLines = [
+      JSON.stringify({ ts: 't', action: 'start', port: 3128, allowlist: ['api.anthropic.com'] }),
+      JSON.stringify({ ts: 't', action: 'allow', method: 'CONNECT', host: 'api.anthropic.com', port: 443 }),
+      JSON.stringify({ ts: 't', action: 'allow', method: 'CONNECT', host: 'registry.npmjs.org', port: 443 }),
+      JSON.stringify({ ts: 't', action: 'deny', method: 'CONNECT', host: 'evil.example.com', port: 443 }),
+      JSON.stringify({ ts: 't', action: 'deny', method: 'CONNECT', host: 'evil.example.com', port: 443 }),
+      JSON.stringify({ ts: 't', action: 'error', method: 'CONNECT', host: 'api.openai.com', error: 'ECONNRESET token=sk-ant-api03-abcdefghijklmnopqrstuvwx' })
+    ];
     const started = await service.start(approved.id);
     expect(['CREATED', 'PREFLIGHT', 'IMPLEMENTING', 'VERIFYING', 'REVIEWING', 'COMPLETED']).toContain(started.state);
     const final = await service.waitForActive();
@@ -64,6 +72,19 @@ describe('RunService', () => {
     expect(existsSync(report.reportPath)).toBe(true);
     expect(sandbox.cleaned).toEqual([final!.runId]);
     expect(service.list().map((r) => r.runId)).toEqual([final!.runId]);
+    // egress ログ: 保存・マスキング・集計（通常の AI 通信 / 拒否 / エラーを区別）
+    const egressFile = readFileSync(join(final!.runDir, 'egress.jsonl'), 'utf8');
+    expect(egressFile).not.toContain('sk-ant-api03-abcdefghijklmnopqrstuvwx');
+    expect(egressFile.split('\n').filter(Boolean)).toHaveLength(6);
+    expect(report.egress).toEqual({
+      available: true,
+      allowed: 2,
+      denied: 2,
+      errors: 1,
+      allowedHosts: ['api.anthropic.com', 'registry.npmjs.org'],
+      deniedHosts: [{ host: 'evil.example.com', count: 2 }],
+      errorHosts: ['api.openai.com']
+    });
   });
 
   it('EX-13: a second run while one is active is refused', async () => {

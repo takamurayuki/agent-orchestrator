@@ -128,6 +128,38 @@
           {/if}
         </section>
 
+        <section class="card" aria-labelledby="egress-heading" data-testid="egress-summary">
+          <h2 id="egress-heading">ネットワーク（egress プロキシ）</h2>
+          {#if !report.egress.available}
+            <p class="muted">この Run の egress ログはありません。</p>
+          {:else}
+            <p class="small">
+              許可（AI / レジストリ通信）: <strong data-testid="egress-allowed">{report.egress.allowed}</strong> 件 ／
+              拒否（allowlist 外）: <strong data-testid="egress-denied">{report.egress.denied}</strong> 件 ／
+              接続エラー: <strong data-testid="egress-errors">{report.egress.errors}</strong> 件
+            </p>
+            <dl>
+              <dt><StatusBadge label="許可" tone="success" /> 通常の AI 通信先</dt>
+              <dd>{report.egress.allowedHosts.length === 0 ? '（なし）' : report.egress.allowedHosts.join(', ')}</dd>
+              <dt><StatusBadge label="拒否" tone="warning" /> allowlist 外への接続（遮断済み）</dt>
+              <dd>
+                {#if report.egress.deniedHosts.length === 0}
+                  （なし）
+                {:else}
+                  <ul data-testid="egress-denied-hosts">
+                    {#each report.egress.deniedHosts as d (d.host)}
+                      <li><code>{d.host}</code> × {d.count}</li>
+                    {/each}
+                  </ul>
+                {/if}
+              </dd>
+              <dt><StatusBadge label="エラー" tone="danger" /> 許可先への接続エラー</dt>
+              <dd>{report.egress.errorHosts.length === 0 ? '（なし）' : report.egress.errorHosts.join(', ')}</dd>
+            </dl>
+            <p class="small muted">ログにはホスト名とポートだけが記録されます（URL パス・ヘッダー・認証情報は含みません）。</p>
+          {/if}
+        </section>
+
         <details class="card" data-testid="diff">
           <summary>差分{report.diffTruncated ? '（サイズ上限により一部省略）' : ''}</summary>
           {#if report.diffExcerpt}

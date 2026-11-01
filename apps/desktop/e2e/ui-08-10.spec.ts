@@ -25,6 +25,12 @@ test.describe('UI-08 承認後', () => {
     await expect(page.getByTestId('changed-files').locator('li')).toHaveCount(6);
     await expect(page.getByTestId('next-actions')).toContainText('手動でコミット');
     await expect(page.getByTestId('report-markdown')).toContainText('実行レポート');
+    // ネットワーク（egress）: 許可 / 拒否 / エラーが区別して表示される
+    const egress = page.getByTestId('egress-summary');
+    await expect(egress).toContainText('api.anthropic.com');
+    await expect(page.getByTestId('egress-allowed')).toHaveText('14');
+    await expect(page.getByTestId('egress-denied')).toHaveText('2');
+    await expect(page.getByTestId('egress-denied-hosts')).toContainText('ab.chatgpt.com');
   });
 });
 

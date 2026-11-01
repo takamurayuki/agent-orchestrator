@@ -21,14 +21,26 @@ const base = JSON.parse(readFileSync(defaultPath, 'utf8'));
 // bwrap が user namespace 内で使う可能性のある syscall（既定では CAP_SYS_ADMIN が必要）
 const CANDIDATES = ['unshare', 'clone', 'clone3', 'mount', 'umount2', 'pivot_root', 'setns', 'chroot', 'sethostname', 'mount_setattr', 'open_tree', 'move_mount'];
 
+// 引数制限（実測で bwrap が動くことを確認済み）:
+//   clone   … 既定の「namespace フラグ無しの clone」許可は残し、追加で許可するのは CLONE_NEWUSER を含む呼び出しだけ
+//   unshare … namespace フラグ（NEWUSER/NEWNS/NEWPID/NEWIPC/NEWUTS/NEWNET/NEWCGROUP）以外のビットが立っていない呼び出しだけ
+//   mount / umount2 / pivot_root … 引数はポインタ（パス）なので seccomp では絞れない
+const CLONE_NEWUSER = 0x10000000;
+const NS_FLAGS = 0x10000000 | 0x00020000 | 0x20000000 | 0x08000000 | 0x04000000 | 0x40000000 | 0x02000000;
+const ARG_FILTERS = {
+  clone: [{ index: 0, value: CLONE_NEWUSER, valueTwo: CLONE_NEWUSER, op: 'SCMP_CMP_MASKED_EQ' }],
+  unshare: [{ index: 0, value: ~NS_FLAGS >>> 0, valueTwo: 0, op: 'SCMP_CMP_MASKED_EQ' }]
+};
+
 function profileWith(allowed) {
   const p = structuredClone(base);
-  // 既定の clone 制限（namespace フラグをマスクで拒否）と clone3 の ERRNO は、allowed に含まれる場合だけ上書きする
+  // 既定の clone3 ERRNO は allowed に含まれる場合だけ外す。既定の clone 制限（namespace フラグ無しの clone を許可）は残す
   p.syscalls = p.syscalls.filter((g) => !(g.names.length === 1 && g.names[0] === 'clone3' && g.action === 'SCMP_ACT_ERRNO' && allowed.includes('clone3')));
-  if (allowed.includes('clone')) {
-    p.syscalls = p.syscalls.filter((g) => !(g.names.length === 1 && g.names[0] === 'clone' && g.args && g.excludes?.caps?.includes('CAP_SYS_ADMIN')));
+  const plain = allowed.filter((n) => !ARG_FILTERS[n]);
+  if (plain.length > 0) p.syscalls.push({ names: plain, action: 'SCMP_ACT_ALLOW', comment: 'agent-orchestrator reviewer: bubblewrap (unprivileged user namespace) without CAP_SYS_ADMIN' });
+  for (const n of allowed.filter((x) => ARG_FILTERS[x])) {
+    p.syscalls.push({ names: [n], action: 'SCMP_ACT_ALLOW', args: ARG_FILTERS[n], comment: `agent-orchestrator reviewer: ${n} restricted to namespace flags` });
   }
-  p.syscalls.push({ names: allowed, action: 'SCMP_ACT_ALLOW', comment: 'agent-orchestrator reviewer: bubblewrap (unprivileged user namespace) without CAP_SYS_ADMIN' });
   return p;
 }
 
