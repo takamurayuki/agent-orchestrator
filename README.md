@@ -93,6 +93,15 @@ Run の起動前には、変更前のリポジトリに対して検証プロフ�
 - **入力検証**: すべての AI 出力と YAML を Zod + JSON Schema で二重検証。IPC は method allowlist と Zod params。子プロセスは常に `shell:false`、コマンド名 allowlist。
 - **リポジトリ調査**: read-only、`.env` / 鍵 / 認証ファイルを除外、symlink を辿らない、ファイル数・サイズ・時間の上限。README 等の内容は非信頼データとしてモデルに渡す。
 
+## 品質保証（v2.1）
+
+- **Policy Gate（静的チェック）**: 各ラウンドの差分に対し、AI レビューとは独立に、新規の `eslint-disable` / `@ts-ignore` / `@ts-nocheck`、テストの `skip` / `only` / `todo` 追加、テストファイル削除、必須検証 scripts（typecheck / lint / test:run）の削除・無効化・変更、tsconfig / ESLint / Vitest・Jest・Playwright 設定の緩和を検出します。ベースコミットの内容と比較するので既存の違反は数えません。コメント・テスト構文・設定は AST（TypeScript コンパイラ API）で解析し、文字列内の一致は無視します。未承認の違反は Builder に差し戻され（修正可能）、残ったままでは完了できません。AI レビューの approved では上書きできません。
+- **例外の承認**: 意図的な例外は**ベースコミット**の `.agent-orchestrator/policy.json` に理由付きで登録します（作業ツリー側＝AI が書いた内容は無視）。
+  ```json
+  { "allow": [{ "ruleId": "PG-ESLINT-DISABLE", "file": "src/legacy/**", "reason": "移行中のため no-console を許容" }] }
+  ```
+- **矛盾検出**: ヒアリングの最後に、要件同士と要件と既存コード・設定（lint ルール、型設定、既存実装）の矛盾を検出し、重大なものは選択肢と影響を示す質問として差し戻します。解消するまで承認できず、判断は意思決定ログ（`decisions.json`、画面の「意思決定ログ」）に残ります。
+
 ## 永続化と出力
 
 ```

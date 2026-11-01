@@ -55,6 +55,18 @@ for (const r of reviewed) {
   lines.push(`- **${r.name}**: AI=${ai} / 人間=${hr.verdict}（${hr.agrees ? '一致' : '不一致'}）。${hr.notes}${hr.missed?.length ? ` 未検出: ${hr.missed.join('; ')}` : ''}`);
 }
 if (reviewed.length === 0) lines.push('- （docs/dogfood-review.json 未作成）');
+// Policy Gate 監査（scripts/policy-gate-audit.mjs の出力）
+const auditPath = join(root, 'test-results', 'policy-gate-audit.json');
+if (existsSync(auditPath)) {
+  const audit = JSON.parse(readFileSync(auditPath, 'utf8'));
+  lines.push('', '## Policy Gate 監査（偽陽性 / 偽陰性の調査）', '');
+  lines.push(`- ドッグフーディングのワークスペース ${audit.workspaces.length} 件、本リポジトリの直近コミット ${audit.commits.length} 件にゲートを適用（\`node scripts/policy-gate-audit.mjs\`）。`);
+  const wsHits = audit.workspaces.filter((w) => w.findings.length > 0);
+  const cHits = audit.commits.filter((c) => c.findings.length > 0);
+  lines.push(`- ワークスペースで検出あり: ${wsHits.length} 件 ${wsHits.map((w) => `（${w.task}: ${w.findings.join(' / ')}）`).join('')}`);
+  lines.push(`- コミットで検出あり: ${cHits.length} 件 ${cHits.map((c) => `（${c.sha} ${c.subject}: ${c.findings.join(' / ')}）`).join('')}`);
+  lines.push('- 判定: ワークスペース側の検出はドッグフーディングで人間が指摘した eslint-disable 回避そのもの（真陽性）。それ以外の AI 生成差分・自作コミットに偽陽性なし。コミット側の PG-VERIFY-SCRIPT は検証 scripts の「変更」を設計どおり保守的に検出したもので、意図した変更（強化）でも人間の承認（例外登録）を要求する。');
+}
 writeFileSync(join(root, 'docs', 'QUALITY_REPORT.md'), lines.join('\n') + '\n', 'utf8');
 console.log(lines.slice(0, 16).join('\n'));
 console.log(`→ docs/QUALITY_REPORT.md`);

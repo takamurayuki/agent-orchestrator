@@ -28,6 +28,16 @@ describe('Policy Gate v2.1 — suppress comments (case 1 / 2 / 3)', () => {
     expect(gate([mod('src/a.ts')], { 'src/a.ts': before }, { 'src/a.ts': afterPlusOne }).blocking).toHaveLength(1);
   });
 
+  it('regression (v2.1 live run): a trailing eslint-disable-line after a template literal with substitutions is detected', () => {
+    const after = "export function makeBanner(title: string, width: number): string {\n  const left = 1;\n  return `${'='.repeat(left)}${title}${'='.repeat(left)}`; // eslint-disable-line no-restricted-syntax\n}\n/* eslint-disable @typescript-eslint/no-explicit-any */ export const z: any = 1; // @ts-ignore\nconst tail = 1; /* eslint-disable-next-line */\n";
+    const hits = collectSuppressComments('src/banner.ts', after);
+    expect(hits.map((h) => `${h.kind}:${h.line}`)).toEqual(['eslint-disable:3', 'eslint-disable:5', 'ts-suppress:5', 'eslint-disable:6']);
+    const r = gate([added('src/banner.ts')], {}, { 'src/banner.ts': after });
+    expect(r.blocking.map((f) => f.ruleId)).toEqual(['PG-ESLINT-DISABLE', 'PG-ESLINT-DISABLE', 'PG-TS-SUPPRESS', 'PG-ESLINT-DISABLE']);
+    // テンプレートリテラルの本文に書かれた文字列はコメントではない
+    expect(collectSuppressComments('x.ts', 'const s = `// eslint-disable-line ${1} // @ts-ignore`;\n')).toEqual([]);
+  });
+
   it('does not treat "eslint-disable" inside a string literal as a comment (AST/scanner based)', () => {
     const after = "export const msg = '// eslint-disable-next-line is not a comment here';\nexport const t = `/* eslint-disable */`;\n";
     expect(collectSuppressComments('src/s.ts', after)).toEqual([]);

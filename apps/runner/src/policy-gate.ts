@@ -126,19 +126,31 @@ interface CommentHit {
 const ESLINT_DISABLE_RE = /^\s*(?:\/\*|\/\/)\s*eslint-disable(?:-next-line|-line)?\b/;
 const TS_SUPPRESS_RE = /^\s*\/\/\s*@ts-(?:ignore|nocheck)\b/;
 
+/**
+ * コメントはパーサ駆動で収集する（全ノード/トークンの leading / trailing comment range）。
+ * 素の scanner.scan() ループはテンプレートリテラルの `${}` 以降を正しく字句解析できず、行末の
+ * `// eslint-disable-line` を取り逃がす（v2.1 実機検証で発覚した偽陰性）。
+ */
 export function collectSuppressComments(path: string, text: string): CommentHit[] {
+  const sf = parse(path, text);
   const hits: CommentHit[] = [];
-  const scanner = ts.createScanner(ts.ScriptTarget.Latest, false, /\.[cm]?jsx?$/i.test(path) ? ts.LanguageVariant.JSX : ts.LanguageVariant.Standard, text);
-  let token = scanner.scan();
-  while (token !== ts.SyntaxKind.EndOfFileToken) {
-    if (token === ts.SyntaxKind.SingleLineCommentTrivia || token === ts.SyntaxKind.MultiLineCommentTrivia) {
-      const comment = scanner.getTokenText();
-      const normalized = comment.replace(/\r?\n/g, ' ');
-      if (ESLINT_DISABLE_RE.test(normalized)) hits.push({ kind: 'eslint-disable', text: normalized.trim().slice(0, 160), line: lineOf(text, scanner.getTokenStart()) });
-      else if (TS_SUPPRESS_RE.test(normalized)) hits.push({ kind: 'ts-suppress', text: normalized.trim().slice(0, 160), line: lineOf(text, scanner.getTokenStart()) });
-    }
-    token = scanner.scan();
-  }
+  const seen = new Set<number>();
+  const addRange = (r: ts.CommentRange) => {
+    if (seen.has(r.pos)) return;
+    seen.add(r.pos);
+    const comment = text.slice(r.pos, r.end);
+    const normalized = comment.replace(/\r?\n/g, ' ');
+    if (ESLINT_DISABLE_RE.test(normalized)) hits.push({ kind: 'eslint-disable', text: normalized.trim().slice(0, 160), line: lineOf(text, r.pos) });
+    else if (TS_SUPPRESS_RE.test(normalized)) hits.push({ kind: 'ts-suppress', text: normalized.trim().slice(0, 160), line: lineOf(text, r.pos) });
+  };
+  const visit = (node: ts.Node) => {
+    for (const r of ts.getLeadingCommentRanges(text, node.getFullStart()) ?? []) addRange(r);
+    for (const r of ts.getTrailingCommentRanges(text, node.getEnd()) ?? []) addRange(r);
+    for (const child of node.getChildren(sf)) visit(child);
+  };
+  visit(sf);
+  for (const r of ts.getLeadingCommentRanges(text, sf.endOfFileToken.getFullStart()) ?? []) addRange(r);
+  hits.sort((a, b) => a.line - b.line);
   return hits;
 }
 

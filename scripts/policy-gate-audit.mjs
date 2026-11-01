@@ -10,7 +10,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const { evaluatePolicyGate, parsePolicyExceptions } = await import(pathToFileURL(join(root, 'apps', 'runner', 'dist', 'policy-gate.js')).href);
-const git = (cwd, args) => execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+const git = (cwd, args) => execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'] });
 const show = (cwd, rev, path) => {
   try {
     return git(cwd, ['show', `${rev}:${path}`]);
