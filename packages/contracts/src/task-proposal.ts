@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { AcceptanceCriterionSchema } from './task.js';
+import { AcceptanceCriterionSchema, GeneratedArtifactSchema } from './task.js';
 
 /** Requirements Agent が blockingQuestions=[] 到達後に生成する task.yaml の素案（schemas/task-proposal.schema.json と等価）。 */
 export const TaskProposalSchema = z.strictObject({
@@ -13,6 +13,8 @@ export const TaskProposalSchema = z.strictObject({
   /** 変更が予想されるファイル・領域（パス、ディレクトリ、glob。v0.2.0 最小実装の原則）。モデルに必須（1 件以上）。保存済みの旧素案は読み出し時に [] で補う */
   expectedChanges: z.array(z.string().min(1)).min(1),
   /** 既存機能・既存実装との衝突の可能性（v0.2.0）。無ければ [] */
-  conflictRisks: z.array(z.string().min(1))
+  conflictRisks: z.array(z.string().min(1)),
+  /** 生成物（スクリプトで再生成されるファイル）の更新要件（v0.2.1、D-41）。無ければ [] */
+  generatedArtifacts: z.array(GeneratedArtifactSchema)
 });
 export type TaskProposal = z.infer<typeof TaskProposalSchema>;

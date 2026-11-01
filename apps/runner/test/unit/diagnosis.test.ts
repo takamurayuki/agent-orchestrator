@@ -54,7 +54,9 @@ describe('project pre-diagnosis (D-38)', () => {
     expect(c.detail).toContain(`${PNPM_DEFAULT_MINIMUM_RELEASE_AGE_MINUTES / 60} 時間`);
     expect(c.detail).toContain('未確認');
     expect(c.fix).toContain('minimumReleaseAge');
-    expect(d.verdict).toBe('needs_attention');
+    expect(c.howToVerify).toContain('pnpm install --frozen-lockfile');
+    // v0.2.1: 未確認だけなら「問題あり」ではなく「未確認」
+    expect(d.verdict).toBe('unverified');
   });
 
   it('flags non-pnpm lockfiles, old lockfile versions and mismatched engines / packageManager', () => {
@@ -66,7 +68,7 @@ describe('project pre-diagnosis (D-38)', () => {
     expect(byId(old, 'lockfile').status).toBe('warn');
     expect(byId(old, 'node').status).toBe('warn');
     expect(byId(old, 'pnpm').status).toBe('warn');
-    expect(old.verdict).toBe('needs_attention');
+    expect(old.verdict).toBe('issues');
   });
 
   it('detects registries and tarball hosts outside the egress allowlist as blocking, and binary downloads as warnings', () => {
@@ -85,7 +87,7 @@ describe('project pre-diagnosis (D-38)', () => {
     });
     expect(byId(prisma, 'network').status).toBe('warn');
     expect(byId(prisma, 'network').detail).toContain('binaries.prisma.sh');
-    expect(prisma.verdict).toBe('needs_attention');
+    expect(prisma.verdict).toBe('issues');
   });
 
   it('lifecycle scripts (not run under --ignore-scripts) are unverified, including workspace packages', () => {

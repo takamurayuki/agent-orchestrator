@@ -13,7 +13,8 @@
     "acceptanceCriteria",
     "openItems",
     "expectedChanges",
-    "conflictRisks"
+    "conflictRisks",
+    "generatedArtifacts"
   ],
   "properties": {
     "title": {
@@ -99,6 +100,34 @@
         "minLength": 1
       },
       "description": "既存機能・既存実装との衝突の可能性と回避方法（v0.2.0）。無ければ空配列"
+    },
+    "generatedArtifacts": {
+      "type": "array",
+      "description": "生成物（スクリプトで再生成されるファイル）の更新要件（v0.2.1）。script は package.json の scripts 名。無ければ空配列",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "path",
+          "script",
+          "reason"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "script": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_:.@/-]+$"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
     }
   }
 }

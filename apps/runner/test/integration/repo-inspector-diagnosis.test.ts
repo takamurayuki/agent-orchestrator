@@ -44,12 +44,12 @@ describe('RepoInspector pre-diagnosis (D-38)', () => {
     expect(r.info.problems).toEqual([]);
   });
 
-  it('without minimumReleaseAge the verdict is needs_attention, the item is unverified (not pass), and it becomes an unknown fact for the interview', async () => {
+  it('without minimumReleaseAge the verdict is unverified (not issues), the item is unverified (not pass), and it becomes an unknown fact for the interview', async () => {
     const r = await inspector().inspect(makeRepo('policy', base));
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.info.status).toBe('ok'); // 要確認は開始を止めない
-    expect(r.info.diagnosis.verdict).toBe('needs_attention');
+    expect(r.info.diagnosis.verdict).toBe('unverified');
     const c = r.info.diagnosis.checks.find((x) => x.id === 'supply_chain');
     expect(c?.status).toBe('unverified');
     expect(r.facts.some((f) => f.key === 'env.supply_chain' && f.confidence === 'unknown' && f.value.includes('未確認'))).toBe(true);
@@ -65,11 +65,11 @@ describe('RepoInspector pre-diagnosis (D-38)', () => {
     expect(prob?.fix).toContain('自動で広げません');
   });
 
-  it('prisma in a verification script is a warning (needs_attention), not a blocker, and is not auto-fixed', async () => {
+  it('prisma in a verification script is a warning (issues), not a blocker, and is not auto-fixed', async () => {
     const r = await inspector().inspect(makeRepo('prisma', { 'package.json': JSON.stringify({ scripts: { typecheck: 'prisma generate && tsc', lint: 'eslint .', 'test:run': 'vitest run' }, devDependencies: { prisma: '5.20.0' } }), 'pnpm-lock.yaml': "lockfileVersion: '9.0'\n", 'pnpm-workspace.yaml': 'minimumReleaseAge: 0\n' }));
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(r.info.diagnosis.verdict).toBe('needs_attention');
+    expect(r.info.diagnosis.verdict).toBe('issues');
     expect(r.info.diagnosis.checks.find((x) => x.id === 'network')?.detail).toContain('binaries.prisma.sh');
     expect(r.info.problems).toEqual([]);
   });

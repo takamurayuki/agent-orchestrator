@@ -2,6 +2,7 @@ import type { VerificationCommandResult, VerificationResult } from '@agent-orche
 import type { VerifierInput } from '../engine.js';
 import { excerpt } from '../masking.js';
 import { CONTAINER_WORKSPACE, type SandboxExecutor } from '../isolation/types.js';
+import { verifyGeneratedArtifacts } from './generated.js';
 import { expectedCommandNames, getProfile } from './profiles.js';
 
 /**
@@ -59,9 +60,16 @@ export class SandboxVerifier {
       commands.push(record);
       if (record.timedOut || record.exitCode !== 0) failed = true;
     }
+    // 生成物の更新検証（v0.2.1、D-41）: プロファイルの検証がすべて通った後に、生成スクリプトを再実行して生成物が最新かを決定的に確認する
+    if (!failed && missing.length === 0 && !input.signal.aborted && (input.generatedArtifacts?.length ?? 0) > 0) {
+      const env = { ...this.extraEnv, CI: '1', FORCE_COLOR: '0', NODE_OPTIONS: '--max-old-space-size=2048', pnpm_config_store_dir: '/workspace/.pnpm-store', pnpm_config_cache_dir: '/workspace/.pnpm-store/cache', pnpm_config_manage_package_manager_versions: 'false', COREPACK_ENABLE_STRICT: '0', COREPACK_ENABLE_AUTO_PIN: '0' };
+      const generated = await verifyGeneratedArtifacts(this.sandbox, { runId: input.runId, round: input.round, artifacts: input.generatedArtifacts ?? [], env, timeoutMs: perCommandTimeout, signal: input.signal, onLog: input.onLog });
+      commands.push(...generated);
+      if (generated.some((g) => g.exitCode !== 0 || g.timedOut)) failed = true;
+    }
     return {
       profile: profile.name,
-      passed: !failed && missing.length === 0 && commands.length === profile.commands.length,
+      passed: !failed && missing.length === 0 && commands.length >= profile.commands.length,
       commands,
       missing,
       startedAt,

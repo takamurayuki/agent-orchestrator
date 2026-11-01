@@ -76,22 +76,55 @@
               </Alert>
             {/if}
             {#if p.diagnosis.checks.length > 0}
+              {@const impacting = p.diagnosis.checks.filter((c) => c.status === 'fail' || c.status === 'warn')}
+              {@const unverified = p.diagnosis.checks.filter((c) => c.status === 'unverified')}
+              {@const okChecks = p.diagnosis.checks.filter((c) => c.status === 'ok')}
               <section class="diagnosis" aria-labelledby="diagnosis-heading" data-testid="project-diagnosis" data-verdict={p.diagnosis.verdict}>
                 <div class="row" style="justify-content: space-between">
                   <h3 id="diagnosis-heading">事前診断（ヒアリング前の確認）</h3>
-                  <StatusBadge label={p.diagnosis.verdict === 'ready' ? '実行可能' : p.diagnosis.verdict === 'needs_attention' ? '要確認' : '実行不可'} tone={p.diagnosis.verdict === 'ready' ? 'success' : p.diagnosis.verdict === 'needs_attention' ? 'warning' : 'danger'} testid="diagnosis-verdict" />
+                  <StatusBadge label={p.diagnosis.verdict === 'ready' ? '実行可能' : p.diagnosis.verdict === 'unverified' ? '未確認あり（実行は可能）' : p.diagnosis.verdict === 'issues' ? '問題あり' : '実行不可'} tone={p.diagnosis.verdict === 'ready' ? 'success' : p.diagnosis.verdict === 'unverified' ? 'info' : p.diagnosis.verdict === 'issues' ? 'warning' : 'danger'} testid="diagnosis-verdict" />
                 </div>
-                <p class="small muted">読み取り専用で調べた結果です。「未確認」は実際に依存解決しないと分からない項目で、実行時に失敗する可能性があります。設定の自動変更は行いません。</p>
-                <ul class="checks">
-                  {#each p.diagnosis.checks as c (c.id)}
-                    <li data-testid="diagnosis-check" data-status={c.status}>
-                      <StatusBadge label={c.status === 'ok' ? '正常' : c.status === 'warn' ? '注意' : c.status === 'fail' ? '問題' : '未確認'} tone={c.status === 'ok' ? 'success' : c.status === 'warn' ? 'warning' : c.status === 'fail' ? 'danger' : 'neutral'} />
-                      <strong>{c.label}</strong>
-                      <div class="small">{c.detail}</div>
-                      {#if c.fix}<div class="small"><strong>対処:</strong> {c.fix}</div>{/if}
-                    </li>
-                  {/each}
-                </ul>
+                <p class="small muted">読み取り専用で調べた結果です。設定や allowlist の自動変更は行いません。</p>
+                {#if impacting.length > 0}
+                  <ul class="checks" aria-label="実行に影響する事項">
+                    {#each impacting as c (c.id)}
+                      <li data-testid="diagnosis-check" data-status={c.status}>
+                        <StatusBadge label={c.status === 'fail' ? '実行不可' : '問題あり'} tone={c.status === 'fail' ? 'danger' : 'warning'} />
+                        <strong>{c.label}</strong>
+                        <div class="small">{c.detail}</div>
+                        {#if c.fix}<div class="small"><strong>対処:</strong> {c.fix}</div>{/if}
+                      </li>
+                    {/each}
+                  </ul>
+                {/if}
+                {#if unverified.length > 0}
+                  <details data-testid="diagnosis-unverified">
+                    <summary>未確認 {unverified.length} 件（問題とは限りません。実行時に失敗する可能性があるため理由と確認方法を記載）</summary>
+                    <ul class="checks">
+                      {#each unverified as c (c.id)}
+                        <li data-testid="diagnosis-check" data-status={c.status}>
+                          <StatusBadge label="未確認" tone="neutral" />
+                          <strong>{c.label}</strong>
+                          <div class="small"><strong>理由:</strong> {c.detail}</div>
+                          {#if c.howToVerify}<div class="small"><strong>確認方法:</strong> {c.howToVerify}</div>{/if}
+                          {#if c.fix}<div class="small"><strong>失敗したとき:</strong> {c.fix}</div>{/if}
+                        </li>
+                      {/each}
+                    </ul>
+                  </details>
+                {/if}
+                <details data-testid="diagnosis-ok">
+                  <summary>正常 {okChecks.length} 件</summary>
+                  <ul class="checks">
+                    {#each okChecks as c (c.id)}
+                      <li data-testid="diagnosis-check" data-status={c.status}>
+                        <StatusBadge label="正常" tone="success" />
+                        <strong>{c.label}</strong>
+                        <div class="small">{c.detail}</div>
+                      </li>
+                    {/each}
+                  </ul>
+                </details>
               </section>
             {/if}
             <dl>

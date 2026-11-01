@@ -20,6 +20,7 @@
     "runner:dev": "tsx apps/runner/src/main.ts",
     "sandbox:build": "node scripts/build-images.mjs",
     "runner:check": "node apps/runner/dist/main.js --check",
+    "quality:report": "node scripts/quality-report.mjs",
     "test:docker": "vitest run tests/integration/docker-sandbox.test.ts",
     "fixture:sample": "node tests/fixtures/make-sample-repo.mjs"
   },

@@ -59,7 +59,8 @@ const defaultProposal = {
   ],
   openItems: [],
   expectedChanges: ['src/server/auth/login.ts', 'src/server/auth/login.test.ts'],
-  conflictRisks: []
+  conflictRisks: [],
+  generatedArtifacts: []
 };
 const q = (id: string, impact: 'blocking' | 'non_blocking', text: string) => ({ id, question: text, decisionImpact: impact, options: [{ value: 'a', label: 'A 案' }, { value: 'b', label: 'B 案' }], recommendation: 'A 案を推奨。理由: 既存方式。リスク: なし' });
 // 契約上 1 ラウンド最大 3 問。4 問以上は複数ラウンドに分かれる（UI-05）
@@ -338,6 +339,67 @@ describe('DraftService conversation state machine (SPEC §5)', () => {
       expect(byTopic['CONTRA-010']).toMatchObject({ status: 'active', chosen: 'keep_rev', source: 'contradiction' });
       // 素案生成に渡る拘束条件は最新の判断だけ
       expect(model.proposalRequests.at(-1)!.decisions.map((d) => d.topicKey)).toEqual(['CONTRA-010']);
+    });
+  });
+
+  describe('v0.2.1 generated artifacts (D-41): unknown generation scripts are asked before approval, never guessed', () => {
+    const withReportScript = () => {
+      writeFileSync(join(repo, 'package.json'), JSON.stringify({ name: 'demo', scripts: { typecheck: 'tsc', lint: 'eslint .', 'test:run': 'vitest run', 'quality:report': 'node scripts/quality-report.mjs' }, dependencies: { svelte: '^5' } }));
+      mkdirSync(join(repo, 'scripts'), { recursive: true });
+      mkdirSync(join(repo, 'docs'), { recursive: true });
+      writeFileSync(join(repo, 'scripts', 'quality-report.mjs'), 'console.log(1)\n');
+      writeFileSync(join(repo, 'docs', 'QUALITY_REPORT.md'), '<!-- scripts/quality-report.mjs により自動生成 -->\n# report\n');
+      git(repo, 'add', '-A');
+      git(repo, 'commit', '-q', '-m', 'report');
+    };
+    const guessed = { ...defaultProposal, generatedArtifacts: [{ path: 'docs/QUALITY_REPORT.md', script: 'report', reason: '生成器を変更するため' }] };
+
+    it('the repo inspection exposes the generation script and the generated file as facts', async () => {
+      withReportScript();
+      const view = await service(new ScriptedModel([done], guessed)).create({ projectPath: repo, request: 'レポートの平均コスト列を追加' });
+      expect(view.facts.some((f) => f.key === 'generation.script' && f.value.startsWith('quality:report'))).toBe(true);
+      expect(view.facts.some((f) => f.key === 'generated.file' && f.value.includes('docs/QUALITY_REPORT.md') && f.value.includes('script: quality:report'))).toBe(true);
+    });
+
+    it('a guessed script that is not in package.json becomes a blocking GEN- question; the answer is applied and the YAML carries the confirmed script', async () => {
+      withReportScript();
+      const model = new ScriptedModel([done], guessed);
+      const svc = service(model);
+      let view = await svc.create({ projectPath: repo, request: 'レポートの平均コスト列を追加' });
+      expect(view.state).toBe('ASKING');
+      expect(view.currentQuestions.map((x) => x.id)).toEqual(['GEN-2-1']);
+      expect(view.blockingQuestions).toEqual(['GEN-2-1']);
+      expect(view.currentQuestions[0]!.question).toContain('生成物「docs/QUALITY_REPORT.md」');
+      expect(view.currentQuestions[0]!.options.map((o) => o.value)).toEqual(['quality:report', 'manual']);
+      expect(view.proposal).toBeNull();
+      await expect(svc.approve({ draftId: view.id, revision: view.revision, acknowledgeDataSharing: true })).rejects.toMatchObject({ code: 'INVALID_STATE' });
+      view = await svc.answer({ draftId: view.id, answers: [{ questionId: 'GEN-2-1', value: 'quality:report', skipped: false }] });
+      expect(view.state, view.blockedReason ?? view.validationErrors.join('; ')).toBe('AWAITING_APPROVAL');
+      expect(view.proposal?.generatedArtifacts).toEqual([{ path: 'docs/QUALITY_REPORT.md', script: 'quality:report', reason: '生成器を変更するため' }]);
+      expect(view.taskYaml).toContain('generatedArtifacts:');
+      expect(view.taskYaml).toContain('script: quality:report');
+      expect(view.decisions.map((d) => d.topicKey)).toEqual(['GEN-2-1']);
+      const approved = await svc.approve({ draftId: view.id, revision: view.revision, acknowledgeDataSharing: true });
+      expect(approved.draft.state).toBe('READY_TO_RUN');
+      expect(approved.taskYaml).toContain('script: quality:report');
+    });
+
+    it('"manual" drops the artifact from the task and records it as out of scope', async () => {
+      withReportScript();
+      const svc = service(new ScriptedModel([done], guessed));
+      let view = await svc.create({ projectPath: repo, request: 'x' });
+      view = await svc.answer({ draftId: view.id, answers: [{ questionId: 'GEN-2-1', value: 'manual', skipped: false }] });
+      expect(view.state, view.blockedReason ?? view.validationErrors.join('; ')).toBe('AWAITING_APPROVAL');
+      expect(view.proposal?.generatedArtifacts).toEqual([]);
+      expect(view.proposal?.outOfScope).toContain('生成物 docs/QUALITY_REPORT.md の更新（人が後で行う）');
+      expect(view.taskYaml).not.toContain('generatedArtifacts:');
+    });
+
+    it('a script that exists in package.json needs no question', async () => {
+      withReportScript();
+      const view = await service(new ScriptedModel([done], { ...guessed, generatedArtifacts: [{ ...guessed.generatedArtifacts[0]!, script: 'quality:report' }] })).create({ projectPath: repo, request: 'x' });
+      expect(view.state, view.blockedReason ?? view.validationErrors.join('; ')).toBe('AWAITING_APPROVAL');
+      expect(view.taskYaml).toContain('script: quality:report');
     });
   });
 

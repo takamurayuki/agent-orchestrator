@@ -28,6 +28,7 @@ const costs = allRounds.map((x) => x.builderCostUsd).filter((x) => typeof x === 
 const avg = (a) => (a.length ? a.reduce((s, x) => s + x, 0) / a.length : null);
 
 const lines = [];
+lines.push('<!-- 自動生成: scripts/quality-report.mjs（pnpm run quality:report）の出力。手で編集せず、生成元を直して再生成する -->', '');
 lines.push('# 品質評価レポート（ドッグフーディング）', '', `生成: ${new Date().toISOString()} 対象: ${runs.length} 件（test-results/dogfood/*.json）`, '');
 lines.push('## 指標', '', '| 指標 | 値 |', '|---|---|');
 lines.push(`| タスク数（Run 開始まで到達 / 全体） | ${started.length} / ${runs.length} |`);
@@ -44,10 +45,11 @@ lines.push(`| 元リポジトリ不変 | ${runs.every((r) => r.originalRepoUncha
 lines.push('');
 // 改善前後の比較（v0.2.0）: タスク名の接頭辞でフェーズ分け
 const phases = [
-  { key: 'v2.x〜β（改善前）', match: (n) => !n.startsWith('v020') },
-  { key: 'v0.2.0（改善後）', match: (n) => n.startsWith('v020') }
+  { key: 'v2.x〜β（改善前）', match: (n) => !n.startsWith('v020') && !n.startsWith('v021') },
+  { key: 'v0.2.0（改善後）', match: (n) => n.startsWith('v020') },
+  { key: 'v0.2.1（安定化）', match: (n) => n.startsWith('v021') }
 ];
-lines.push('', '## 改善前後（名前接頭辞 v020- で区別）', '', '| フェーズ | タスク | 完了率 | 実行環境起因の失敗 | 要確認 | 承認前停止 | 平均時間 | 平均ラウンド | Builder 費用（合計 / 完了タスク平均） | レビュー指摘ありラウンド | unknown |', '|---|---|---|---|---|---|---|---|---|---|---|');
+lines.push('', '## 改善前後（名前接頭辞 v020- / v021- で区別）', '', '| フェーズ | タスク | 完了率 | 実行環境起因の失敗 | 要確認 | 承認前停止 | 平均時間 | 平均ラウンド | Builder 費用（合計 / 完了タスク平均） | レビュー指摘ありラウンド | unknown |', '|---|---|---|---|---|---|---|---|---|---|---|');
 for (const ph of phases) {
   const rs = runs.filter((r) => ph.match(r.name));
   if (rs.length === 0) continue;

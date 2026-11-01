@@ -14,12 +14,13 @@ import {
   type RunStatus,
   type VerificationResult
 } from '@agent-orchestrator/contracts';
-import type { ScopeCheck } from '@agent-orchestrator/contracts';
+import type { GeneratedArtifact, ScopeCheck } from '@agent-orchestrator/contracts';
 import { evaluateCompletionGate, type GateResult } from './gate.js';
 import { checkDiffPolicy } from './policy.js';
 import { evaluatePolicyGate, parsePolicyExceptions, renderPolicyFeedback } from './policy-gate.js';
 import { evaluateScope, renderScopeFeedback } from './scope.js';
 import { checkStructure, structureCommandResult } from './verification/structure.js';
+import { generatedCommandNames } from './verification/generated.js';
 
 /**
  * 実行状態機械（SPEC §6）。外部副作用はすべて EngineDeps 経由で注入し、単体テストではモックする。
@@ -95,6 +96,8 @@ export interface VerifierInput {
   round: number;
   workspace: WorkspaceHandle;
   profile: ResolvedTask['verificationProfile'];
+  /** 生成物の更新検証（v0.2.1）。ベースライン（round 0）では渡さない */
+  generatedArtifacts?: GeneratedArtifact[];
   timeoutMs: number;
   signal: AbortSignal;
   onLog: (chunk: string) => void;
@@ -464,6 +467,7 @@ export class RunEngine {
           round,
           workspace,
           profile: task.verificationProfile,
+          generatedArtifacts: task.generatedArtifacts ?? [],
           timeoutMs: Math.min(task.limits.verificationTimeoutSeconds * 1000, remainingMs()),
           signal,
           onLog: (c) => verifyLog.push(c)
@@ -570,7 +574,7 @@ export class RunEngine {
           const gate: GateResult = evaluateCompletionGate({
             taskApproved: snapshot.approved,
             verification,
-            expectedVerificationCommands: [...this.deps.verifier.expectedCommands(task.verificationProfile), 'structure'],
+            expectedVerificationCommands: [...this.deps.verifier.expectedCommands(task.verificationProfile), ...generatedCommandNames(task.generatedArtifacts), 'structure'],
             diff: diff.summary,
             review,
             blockingSeverities,

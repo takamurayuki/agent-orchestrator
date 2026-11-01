@@ -60,6 +60,7 @@ export function renderReviewerPrompt(input: ReviewerInput): string {
   if (t.expectedChanges && t.expectedChanges.length > 0) lines.push('', '## Expected scope (from the approved task)', ...t.expectedChanges.map((e) => `- ${e}`));
   if (t.conflictRisks && t.conflictRisks.length > 0) lines.push('', '## Known conflict risks (from the approved task)', ...t.conflictRisks.map((c) => `- ${c}`));
   if (input.scopeCheck && input.scopeCheck.severity !== 'none') lines.push('', '## Scope check by the orchestrator', `- ${input.scopeCheck.severity}: ${input.scopeCheck.detail}`);
+  if (t.generatedArtifacts && t.generatedArtifacts.length > 0) lines.push('', '## Generated artifacts (already regenerated and compared by the verifier; see generate:* results — do not ask for regeneration)', ...t.generatedArtifacts.map((g) => `- ${g.path} ← pnpm run ${g.script}`));
   lines.push('', '## Verification results (already executed by the orchestrator)');
   for (const c of input.verification.commands) lines.push(`- ${c.name}: exit=${c.exitCode ?? 'null'}${c.timedOut ? ' TIMEOUT' : ''}`);
   lines.push('', '## Changed files (including untracked)');

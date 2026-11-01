@@ -101,12 +101,14 @@ export const ProjectDiagnosisCheckSchema = z.strictObject({
   label: z.string(),
   status: z.enum(['ok', 'warn', 'fail', 'unverified']),
   detail: z.string(),
-  fix: z.string().nullable()
+  fix: z.string().nullable(),
+  /** unverified の確認方法（v0.2.1）。利用者が自分で確かめる手順 */
+  howToVerify: z.string().nullable().default(null)
 });
 export type ProjectDiagnosisCheck = z.infer<typeof ProjectDiagnosisCheckSchema>;
 export const ProjectDiagnosisSchema = z.strictObject({
-  /** ready=実行可能 / needs_attention=要確認（warn / unverified あり） / blocked=実行不可（fail あり） */
-  verdict: z.enum(['ready', 'needs_attention', 'blocked']),
+  /** ready=実行可能 / unverified=未確認あり（実行は可能、失敗する可能性） / issues=問題あり（warn: 実行に影響） / blocked=実行不可（fail） */
+  verdict: z.enum(['ready', 'unverified', 'issues', 'blocked']),
   checks: z.array(ProjectDiagnosisCheckSchema)
 });
 export type ProjectDiagnosis = z.infer<typeof ProjectDiagnosisSchema>;

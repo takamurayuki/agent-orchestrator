@@ -60,6 +60,18 @@
       <p class="small muted">この範囲の外に大きな変更があった場合、AI は検証・レビューの前に止まり、人の判断を求めます。</p>
     {/if}
 
+    <h3>生成物の更新（自動で再生成して確認）</h3>
+    {#if p.generatedArtifacts.length === 0}
+      <p class="muted" data-testid="overview-generated-artifacts">なし</p>
+    {:else}
+      <ul data-testid="overview-generated-artifacts">
+        {#each p.generatedArtifacts as g, i (i)}
+          <li><code>{g.path}</code> ← <code>pnpm run {g.script}</code><span class="small muted">（{g.reason}）</span></li>
+        {/each}
+      </ul>
+      <p class="small muted">AI がスクリプトを実行して更新し、検証で再実行して最新であることを確認します。</p>
+    {/if}
+
     <h3>既存機能との衝突の可能性</h3>
     {#if p.conflictRisks.length === 0}
       <p class="muted" data-testid="overview-conflict-risks">特定されていません</p>

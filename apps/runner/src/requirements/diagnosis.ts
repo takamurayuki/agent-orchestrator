@@ -104,7 +104,7 @@ function hostOf(url: string): string | null {
 
 export function diagnoseProject(input: DiagnosisInput): ProjectDiagnosis {
   const checks: ProjectDiagnosisCheck[] = [];
-  const add = (c: ProjectDiagnosisCheck) => checks.push(c);
+  const add = (c: Omit<ProjectDiagnosisCheck, 'howToVerify'> & { howToVerify?: string | null }) => checks.push({ howToVerify: null, ...c });
   const versions = sandboxVersions();
   const pkg = parseJson<PackageJson>(input.readText('package.json'));
   const allow = new Set(input.egressAllowlist.map((h) => h.toLowerCase()));
@@ -125,7 +125,7 @@ export function diagnoseProject(input: DiagnosisInput): ProjectDiagnosis {
   const enginesNode = pkg?.engines?.node;
   if (enginesNode) {
     const ok = satisfiesMajor(enginesNode, versions.node);
-    add({ id: 'node', label: 'Node.js バージョン', status: ok === null ? 'unverified' : ok ? 'ok' : 'warn', detail: ok === null ? `engines.node "${enginesNode}" を判定できません（サンドボックスは Node ${versions.node}）` : ok ? `engines.node "${enginesNode}" はサンドボックスの Node ${versions.node} を満たします` : `engines.node "${enginesNode}" はサンドボックスの Node ${versions.node} と一致しません。検証コマンドが失敗する可能性があります`, fix: ok === false ? 'プロジェクトが Node 22 で動くことを確認するか、engines.node を見直してください（サンドボックスの Node は固定です）' : null });
+    add({ id: 'node', label: 'Node.js バージョン', status: ok === null ? 'unverified' : ok ? 'ok' : 'warn', detail: ok === null ? `engines.node "${enginesNode}" を判定できません（サンドボックスは Node ${versions.node}）` : ok ? `engines.node "${enginesNode}" はサンドボックスの Node ${versions.node} を満たします` : `engines.node "${enginesNode}" はサンドボックスの Node ${versions.node} と一致しません。検証コマンドが失敗する可能性があります`, fix: ok === false ? 'プロジェクトが Node 22 で動くことを確認するか、engines.node を見直してください（サンドボックスの Node は固定です）' : null, howToVerify: ok === null ? `Node ${versions.node} で typecheck / lint / test:run が通るか確認する` : null });
   } else {
     add({ id: 'node', label: 'Node.js バージョン', status: 'ok', detail: `engines.node の指定なし（サンドボックスは Node ${versions.node}）`, fix: null });
   }
@@ -149,7 +149,7 @@ export function diagnoseProject(input: DiagnosisInput): ProjectDiagnosis {
   if (mra !== null) {
     add({ id: 'supply_chain', label: 'サプライチェーン設定（minimumReleaseAge）', status: 'ok', detail: `minimumReleaseAge = ${mra} 分（プロジェクト設定、${mraWs ? 'pnpm-workspace.yaml' : '.npmrc'}）`, fix: null });
   } else {
-    add({ id: 'supply_chain', label: 'サプライチェーン設定（minimumReleaseAge）', status: 'unverified', detail: `プロジェクトに設定が無いため、サンドボックスの pnpm ${versions.pnpm} の既定（公開から ${PNPM_DEFAULT_MINIMUM_RELEASE_AGE_MINUTES / 60} 時間未満のパッケージを拒否）が適用されます。lockfile に直近 24 時間以内に公開されたパッケージがあると install が失敗します（公開日時は依存解決しないと分からないため未確認）`, fix: 'pnpm-workspace.yaml に minimumReleaseAge / minimumReleaseAgeExclude を明示するか、依存を更新してから 1 日空けて実行してください' });
+    add({ id: 'supply_chain', label: 'サプライチェーン設定（minimumReleaseAge）', status: 'unverified', detail: `プロジェクトに設定が無いため、サンドボックスの pnpm ${versions.pnpm} の既定（公開から ${PNPM_DEFAULT_MINIMUM_RELEASE_AGE_MINUTES / 60} 時間未満のパッケージを拒否）が適用されます。lockfile に直近 24 時間以内に公開されたパッケージがあると install が失敗します（公開日時は依存解決しないと分からないため未確認）`, fix: '問題ではありません。失敗した場合は pnpm-workspace.yaml に minimumReleaseAge / minimumReleaseAgeExclude を明示するか、依存を更新してから 1 日空けて再実行してください', howToVerify: `プロジェクトで pnpm ${versions.pnpm.split('.')[0]} 系を使い \`pnpm install --frozen-lockfile\` が通るか確認する（公開 24 時間未満の依存があれば ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION で失敗する）。直近に依存を更新していなければ通常は問題ありません` });
   }
 
   // 4. インストールスクリプト（--ignore-scripts で実行されない）
@@ -162,7 +162,7 @@ export function diagnoseProject(input: DiagnosisInput): ProjectDiagnosis {
   for (const { path, pkg: p } of allPkgs) {
     for (const s of ['preinstall', 'install', 'postinstall', 'prepare']) if (typeof p.scripts?.[s] === 'string') lifecycle.push(`${path}#${s}`);
   }
-  if (lifecycle.length > 0) add({ id: 'install_scripts', label: 'インストール時スクリプト', status: 'unverified', detail: `${lifecycle.join(', ')} は --ignore-scripts のため実行されません。生成物に依存する検証は失敗する可能性があります（実行しないと分からないため未確認）`, fix: '検証コマンド（typecheck / lint / test:run）がインストールスクリプト無しで通ることを確認してください' });
+  if (lifecycle.length > 0) add({ id: 'install_scripts', label: 'インストール時スクリプト', status: 'unverified', detail: `${lifecycle.join(', ')} は --ignore-scripts のため実行されません。生成物に依存する検証は失敗する可能性があります（実行しないと分からないため未確認）`, fix: '失敗した場合は、生成物をコミットするか、検証コマンドからその手順を外してください', howToVerify: 'プロジェクトで `pnpm install --ignore-scripts` の後に typecheck / lint / test:run が通るか確認する' });
   else add({ id: 'install_scripts', label: 'インストール時スクリプト', status: 'ok', detail: 'preinstall / postinstall / prepare なし', fix: null });
 
   // 5. ネットワーク（allowlist との不一致）
@@ -206,6 +206,7 @@ export function diagnoseProject(input: DiagnosisInput): ProjectDiagnosis {
   add({ id: 'verification', label: '検証プロファイル node-pnpm', status: input.verificationReady ? 'ok' : 'fail', detail: input.verificationDetail, fix: input.verificationReady ? null : 'package.json に typecheck / lint / test:run を定義し、pnpm-lock.yaml を用意してください' });
   if (input.isClean === false) add({ id: 'worktree', label: '作業ツリー', status: 'fail', detail: '未コミットの変更があります（ベース SHA を固定できません）', fix: '実行前に commit または stash してください' });
 
-  const verdict: ProjectDiagnosis['verdict'] = checks.some((c) => c.status === 'fail') ? 'blocked' : checks.some((c) => c.status === 'warn' || c.status === 'unverified') ? 'needs_attention' : 'ready';
+  // 実行不可（fail）> 問題あり（warn: 実行に影響）> 未確認（unverified: 失敗する可能性はあるが問題と断定しない）> 実行可能
+  const verdict: ProjectDiagnosis['verdict'] = checks.some((c) => c.status === 'fail') ? 'blocked' : checks.some((c) => c.status === 'warn') ? 'issues' : checks.some((c) => c.status === 'unverified') ? 'unverified' : 'ready';
   return { verdict, checks };
 }

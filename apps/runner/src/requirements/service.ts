@@ -6,6 +6,7 @@ import { detectProhibitedOperations } from '../policy.js';
 import type { Repository, DraftRow } from '../storage/repository.js';
 import { checkProfileReadiness } from '../verification/profiles.js';
 import { activeDecisions, decisionFromContradiction, decisionFromInterviewAnswer, decisionsFromRevision, makeDecision, resolveConflicts, retractDecision } from './decisions.js';
+import { applyGenerationDecisions, detectGenerationScripts, generationQuestions, unknownGenerationScripts } from './generated.js';
 import { analyzeContradictions, analyzeGap, contradictionsToQuestions, validateProposal, type InterviewModel } from './gap-analyzer.js';
 import { previousAnsweredRound, validateAnswers, type AnswerInput } from './questions.js';
 import { renderDigest, type RepoDigest, type RepoInspector } from './repo-inspector.js';
@@ -141,6 +142,11 @@ export class DraftService {
     if (draft.contradictions.some((c) => c.severity === 'blocking')) throw new DraftServiceError('DRAFT_BLOCKED', `重大な矛盾が未解消です: ${draft.contradictions.map((c) => c.id).join(', ')}`);
     const parsed = parseAndValidateTaskYaml(rev.taskYaml);
     if (!parsed.ok) throw new DraftServiceError('VALIDATION_FAILED', `task.yaml が契約に適合しません: ${parsed.errors.join('; ')}`);
+    if ((parsed.task.generatedArtifacts ?? []).length > 0) {
+      const scripts = (await this.context(draft)).digest.packageJson?.scripts ?? {};
+      const missing = (parsed.task.generatedArtifacts ?? []).filter((g) => typeof scripts[g.script] !== 'string');
+      if (missing.length > 0) throw new DraftServiceError('VALIDATION_FAILED', `生成スクリプトが package.json にありません: ${missing.map((g) => `${g.script}（${g.path}）`).join(', ')}。承認前に生成手段を確定してください`);
+    }
     const project = this.deps.repo.getProject(draft.projectId);
     const readiness = checkProfileReadiness(project?.path ?? parsed.task.repository, parsed.task.verificationProfile);
     if (!readiness.ready) throw new DraftServiceError('VALIDATION_FAILED', `検証プロファイルを実行できません: ${readiness.detail}`);
@@ -247,9 +253,25 @@ export class DraftService {
       draft = this.deps.repo.updateDraft(draft.id, { state: 'BLOCKED', blockedReason: `タスク素案を生成できません: ${proposal.error}` });
       return this.view(draft);
     }
-    const validated = validateProposal(proposal.value);
-    if (!validated.ok) {
-      draft = this.deps.repo.updateDraft(draft.id, { state: 'BLOCKED', blockedReason: validated.error });
+    const validatedRaw = validateProposal(proposal.value);
+    if (!validatedRaw.ok) {
+      draft = this.deps.repo.updateDraft(draft.id, { state: 'BLOCKED', blockedReason: validatedRaw.error });
+      return this.view(draft);
+    }
+    // 生成物（v0.2.1、D-41）: GEN- 質問への判断を素案に適用し、生成手段が不明なものは推測せず承認前に尋ねる
+    const scriptsMap = Object.fromEntries(Object.entries(ctx.digest.packageJson?.scripts ?? {}).filter(([, v]) => typeof v === 'string')) as Record<string, string>;
+    const validated = { ok: true as const, value: applyGenerationDecisions(validatedRaw.value, activeDecisions(this.deps.repo.listDecisions(draft.id))) };
+    const unknownGen = unknownGenerationScripts(validated.value.generatedArtifacts, scriptsMap);
+    if (unknownGen.length > 0) {
+      const nextRound = round + 1;
+      const questions = generationQuestions(unknownGen, detectGenerationScripts(scriptsMap, ctx.digest.tree), nextRound);
+      if (asked.length + questions.length > 15 || nextRound > 5) {
+        draft = this.deps.repo.updateDraft(draft.id, { state: 'BLOCKED', blockedReason: `生成物の更新手段が確定しないまま質問上限に達しました: ${unknownGen.map((a) => `${a.path}（${a.script}）`).join(' / ')}。生成スクリプトを package.json に用意するか、依頼から生成物の更新を外してください。` });
+        return this.view(draft);
+      }
+      this.deps.repo.addQuestions(draft.id, questions);
+      this.contexts.set(draft.id, { ...ctx, pendingProposal: validated.value });
+      draft = this.deps.repo.updateDraft(draft.id, { state: 'ASKING', round: nextRound, summary: a.interview.summary });
       return this.view(draft);
     }
     // 矛盾検出（v2.1）: 要件同士 / 要件と既存コード・設定。blocking は承認前に解消させる（質問として差し戻す）

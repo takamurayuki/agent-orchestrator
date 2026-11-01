@@ -3,6 +3,7 @@ import { join, relative, resolve, sep } from 'node:path';
 import type { Fact, ProjectInfo } from '@agent-orchestrator/contracts';
 import type { RunnerConfig } from '../config.js';
 import { diagnoseProject } from './diagnosis.js';
+import { detectGeneratedFiles, detectGenerationScripts, generationFacts } from './generated.js';
 import { checkProfileReadiness } from '../verification/profiles.js';
 import { collectEslintSettings, parseJsonc } from '../policy-gate.js';
 import type { WorkspaceManager } from '../workspace.js';
@@ -242,6 +243,9 @@ export class RepoInspector {
       }
     }
     if (files.includes('pnpm-workspace.yaml')) fact('monorepo', 'pnpm workspace', 'pnpm-workspace.yaml', 'confirmed');
+    // 生成物（v0.2.1、D-41）: 生成スクリプト候補と、ヘッダーに自動生成の記載があるファイル
+    const scriptsMap = Object.fromEntries(Object.entries(pkg?.scripts ?? {}).filter(([, v]) => typeof v === 'string')) as Record<string, string>;
+    facts.push(...generationFacts(detectGenerationScripts(scriptsMap, files), detectGeneratedFiles(files, (p) => readText(p)?.slice(0, 600) ?? null, scriptsMap)));
 
     const readiness = checkProfileReadiness(root, 'node-pnpm');
     fact('verification.node-pnpm', readiness.ready ? '実行可能（typecheck / lint / test:run あり）' : readiness.detail, 'package.json', 'confirmed');

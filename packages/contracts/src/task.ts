@@ -14,6 +14,17 @@ export const AcceptanceCriterionSchema = z.strictObject({
 });
 export type AcceptanceCriterion = z.infer<typeof AcceptanceCriterionSchema>;
 
+/**
+ * 生成物の更新要件（v0.2.1、D-41）。script は package.json の scripts 名（任意のシェルコマンドは不可）。
+ * Verifier が `pnpm run <script>` を実行して生成物が最新であることを確認する。
+ */
+export const GeneratedArtifactSchema = z.strictObject({
+  path: z.string().min(1),
+  script: z.string().min(1).regex(/^[A-Za-z0-9_:.@/-]+$/, 'script は package.json の scripts 名'),
+  reason: z.string().min(1)
+});
+export type GeneratedArtifact = z.infer<typeof GeneratedArtifactSchema>;
+
 export const TaskLimitsSchema = z.strictObject({
   maxImplementationAttempts: z.number().int().min(1).max(3).default(3),
   maxDurationSeconds: z.number().int().min(60).default(2700),
@@ -45,7 +56,9 @@ export const TaskSchema = z.strictObject({
   /** 変更が予想されるファイル・領域（v0.2.0）。空ならスコープ判定を行わない */
   expectedChanges: z.array(z.string().min(1)).optional(),
   /** 既存機能との衝突の可能性（v0.2.0、Builder / Reviewer への注意喚起） */
-  conflictRisks: z.array(z.string().min(1)).optional()
+  conflictRisks: z.array(z.string().min(1)).optional(),
+  /** 生成物の更新要件（v0.2.1）。Verifier が再生成して最新であることを確認する */
+  generatedArtifacts: z.array(GeneratedArtifactSchema).optional()
 });
 export type Task = z.infer<typeof TaskSchema>;
 export type TaskInput = z.input<typeof TaskSchema>;

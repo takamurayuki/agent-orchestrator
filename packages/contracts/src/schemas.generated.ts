@@ -380,7 +380,8 @@ export const EMBEDDED_SCHEMAS: Record<string, Record<string, unknown>> = {
       "acceptanceCriteria",
       "openItems",
       "expectedChanges",
-      "conflictRisks"
+      "conflictRisks",
+      "generatedArtifacts"
     ],
     "properties": {
       "title": {
@@ -466,6 +467,34 @@ export const EMBEDDED_SCHEMAS: Record<string, Record<string, unknown>> = {
           "minLength": 1
         },
         "description": "既存機能・既存実装との衝突の可能性と回避方法（v0.2.0）。無ければ空配列"
+      },
+      "generatedArtifacts": {
+        "type": "array",
+        "description": "生成物（スクリプトで再生成されるファイル）の更新要件（v0.2.1）。script は package.json の scripts 名。無ければ空配列",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "script",
+            "reason"
+          ],
+          "properties": {
+            "path": {
+              "type": "string",
+              "minLength": 1
+            },
+            "script": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9_:.@/-]+$"
+            },
+            "reason": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
       }
     }
   },
@@ -613,6 +642,34 @@ export const EMBEDDED_SCHEMAS: Record<string, Record<string, unknown>> = {
           "minLength": 1
         },
         "description": "既存機能との衝突の可能性（v0.2.0）"
+      },
+      "generatedArtifacts": {
+        "type": "array",
+        "description": "生成物の更新要件（v0.2.1）。Verifier が pnpm run <script> で再生成して最新であることを確認する",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "script",
+            "reason"
+          ],
+          "properties": {
+            "path": {
+              "type": "string",
+              "minLength": 1
+            },
+            "script": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9_:.@/-]+$"
+            },
+            "reason": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
       }
     }
   }
