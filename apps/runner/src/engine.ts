@@ -14,9 +14,12 @@ import {
   type RunStatus,
   type VerificationResult
 } from '@agent-orchestrator/contracts';
+import type { ScopeCheck } from '@agent-orchestrator/contracts';
 import { evaluateCompletionGate, type GateResult } from './gate.js';
 import { checkDiffPolicy } from './policy.js';
 import { evaluatePolicyGate, parsePolicyExceptions, renderPolicyFeedback } from './policy-gate.js';
+import { evaluateScope, renderScopeFeedback } from './scope.js';
+import { checkStructure, structureCommandResult } from './verification/structure.js';
 
 /**
  * 実行状態機械（SPEC §6）。外部副作用はすべて EngineDeps 経由で注入し、単体テストではモックする。
@@ -83,6 +86,8 @@ export interface BuilderFeedback {
   reviewSummary: string | null;
   /** Policy Gate の未承認 blocking 検出（v2.1）。ルールを無効化せずコードを直すよう Builder に返す */
   policyFindings: string[];
+  /** 重大なスコープ逸脱（v0.2.0）。期待範囲に収めるか理由を述べるよう Builder に返す */
+  scopeDeviation?: string | null;
 }
 
 export interface VerifierInput {
@@ -103,6 +108,8 @@ export interface ReviewerInput {
   taskYaml: string;
   diff: DiffCapture;
   verification: VerificationResult;
+  /** スコープ判定（v0.2.0）。Reviewer への文脈 */
+  scopeCheck?: ScopeCheck | null;
   timeoutMs: number;
   signal: AbortSignal;
   onLog: (chunk: string) => void;
@@ -173,6 +180,7 @@ export const NEXT_ACTIONS: Record<RunReasonCode, string[]> = {
   BUILDER_FAILED: ['Builder（Claude Code）が異常終了しました。rounds/<n>/builder.log を確認し、認証・通信・権限を確認してください'],
   BUILDER_TIMEOUT: ['Builder がタイムアウトしました。cliTimeoutSeconds の見直し、またはタスクの分割を検討してください'],
   NO_CHANGES: ['Builder が変更を生成しませんでした。要件が既に満たされているか、依頼内容が不明確な可能性があります'],
+  SCOPE_DEVIATION: ['承認した範囲（expectedChanges）の外に重大な変更があります。rounds/<n>/diff.patch と Builder の変更理由を確認し、意図どおりなら要件の変更範囲を広げて新しい依頼として再実行するか、不要な変更を手動で取り除いてください'],
   POLICY_VIOLATION: ['差分にポリシー違反（eslint-disable / ts-ignore の追加、テストの skip・削除、検証設定の緩和、禁止パス）があります。rounds/<n>/policy.json を確認し、手動で修正するか、意図的な例外ならベースコミットの .agent-orchestrator/policy.json に理由付きで登録して再実行してください'],
   WORKSPACE_MODIFIED_DURING_REVIEW: ['レビュー中に worktree が変更されました。Reviewer の read-only 隔離を確認してください'],
   TIMEOUT: ['maxDurationSeconds を超過しました。途中成果は worktree に残っています'],
@@ -339,6 +347,7 @@ export class RunEngine {
           round,
           builder: null,
           diff: null,
+          scopeCheck: null,
           policyViolations: [],
           policyFindings: [],
           verification: null,
@@ -396,6 +405,19 @@ export class RunEngine {
           await this.deps.recorder.saveRound(runId, record);
           return await finish('NEEDS_HUMAN', 'NO_CHANGES', `round ${round}: Builder が変更を生成しなかった`);
         }
+        // スコープ判定（v0.2.0、D-39）: 承認した expectedChanges と差分を比較。重大な逸脱は Builder に 1 度返し、残れば人間の判断
+        const scopeCheck = evaluateScope(diff.summary.files, task.expectedChanges, builder.resultExcerpt);
+        record.scopeCheck = scopeCheck;
+        await emit('scope.checked', { round, severity: scopeCheck.severity, unexpected: scopeCheck.unexpected.length, detail: scopeCheck.detail }, round);
+        if (scopeCheck.severity === 'major') {
+          record.finishedAt = new Date(this.deps.now()).toISOString();
+          await this.deps.recorder.saveRound(runId, record);
+          if (round >= maxRounds) {
+            return await finish('NEEDS_HUMAN', 'SCOPE_DEVIATION', `round ${round}: ${scopeCheck.detail}`);
+          }
+          feedback = { previousRound: round, verificationFailures: [], reviewFindings: [], requirementsUnverified: [], reviewSummary: null, policyFindings: [], scopeDeviation: renderScopeFeedback(scopeCheck) };
+          continue; // 検証・レビューは行わない（範囲内に収めてから）
+        }
         // セキュリティ系（worktree 外・禁止パス）は即停止
         const violations: PolicyViolation[] = checkDiffPolicy({ files: diff.summary.files, patches: diff.patches });
         record.policyViolations = violations;
@@ -446,6 +468,17 @@ export class RunEngine {
           signal,
           onLog: (c) => verifyLog.push(c)
         });
+        // 決定的な構造検証（v0.2.0、D-40）: 変更された JSON / YAML / Markdown をホスト側で機械的に確認し、検証結果に加える
+        {
+          const t0 = this.deps.now();
+          const wsHandle = workspace;
+          const issues = verification.commands.every((c) => c.exitCode === 0 && !c.timedOut) && verification.missing.length === 0 ? checkStructure(diff.summary.files, (p: string) => this.deps.workspace.readWorkspaceFile(wsHandle, p)) : [];
+          const structure = structureCommandResult(issues, Math.max(0, this.deps.now() - t0));
+          if (verification.commands.every((c) => c.exitCode === 0 && !c.timedOut) && verification.missing.length === 0) {
+            verification.commands.push(structure);
+            if (structure.exitCode !== 0) verification.passed = false;
+          }
+        }
         record.verification = verification;
         await this.deps.recorder.saveArtifact(runId, round, 'verify.json', JSON.stringify(verification, null, 2));
         await this.deps.recorder.saveArtifact(runId, round, 'verify.log', verifyLog.join(''));
@@ -482,6 +515,7 @@ export class RunEngine {
         await emit('review.started', { round, workspaceHash: record.workspaceHashBeforeReview }, round);
         const reviewLog: string[] = [];
         const review = await this.deps.reviewer.review({
+          scopeCheck: record.scopeCheck,
           runId,
           round,
           workspace,
@@ -536,7 +570,7 @@ export class RunEngine {
           const gate: GateResult = evaluateCompletionGate({
             taskApproved: snapshot.approved,
             verification,
-            expectedVerificationCommands: this.deps.verifier.expectedCommands(task.verificationProfile),
+            expectedVerificationCommands: [...this.deps.verifier.expectedCommands(task.verificationProfile), 'structure'],
             diff: diff.summary,
             review,
             blockingSeverities,
@@ -545,6 +579,7 @@ export class RunEngine {
             withinTimeLimit: withinTime(),
             policyViolations: violations,
             unapprovedPolicyFindings,
+            scopeCheck: record.scopeCheck,
             allEventsPersisted: persisted >= lastSequence
           });
           await emit('gate.evaluated', { round, passed: gate.passed, failures: gate.failures }, round);

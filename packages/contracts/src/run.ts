@@ -35,6 +35,7 @@ export const RUN_REASON_CODES = [
   'BUILDER_TIMEOUT',
   'NO_CHANGES',
   'POLICY_VIOLATION',
+  'SCOPE_DEVIATION',
   'WORKSPACE_MODIFIED_DURING_REVIEW',
   'TIMEOUT',
   'GATE_FAILED',
@@ -137,10 +138,24 @@ export const BuilderOutcomeSchema = z.strictObject({
 });
 export type BuilderOutcome = z.infer<typeof BuilderOutcomeSchema>;
 
+/** スコープ判定（v0.2.0、D-39）: 承認済み task の expectedChanges と差分の比較 */
+export const ScopeCheckSchema = z.strictObject({
+  expected: z.array(z.string()),
+  unexpected: z.array(z.string()),
+  /** none=逸脱なし / minor=軽微（記録のみ） / major=重大（人間の判断） */
+  severity: z.enum(['none', 'minor', 'major']),
+  detail: z.string(),
+  /** Builder が最終報告で述べた変更理由（抜粋、マスキング済み） */
+  builderReason: z.string().nullable()
+});
+export type ScopeCheck = z.infer<typeof ScopeCheckSchema>;
+
 export const RoundRecordSchema = z.strictObject({
   round: z.number().int().min(1),
   builder: BuilderOutcomeSchema.nullable(),
   diff: DiffSummarySchema.nullable(),
+  /** スコープ判定（v0.2.0）。古い記録では省略 */
+  scopeCheck: ScopeCheckSchema.nullable().default(null),
   policyViolations: z.array(PolicyViolationSchema),
   /** Policy Gate の検出（v2.1）。古い記録では省略 */
   policyFindings: z.array(PolicyFindingSchema).default([]),

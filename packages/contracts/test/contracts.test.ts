@@ -133,7 +133,9 @@ describe('contracts: task proposal', () => {
       outOfScope: [],
       approach: 'a',
       acceptanceCriteria: [{ id: 'AC-1', given: 'g', when: 'w', then: 't' }],
-      openItems: []
+      openItems: [],
+      expectedChanges: ['src/x.ts'],
+      conflictRisks: []
     });
     expect(ok.ok).toBe(true);
     expect(validateTaskProposal({ title: 't', objective: 'o', requirements: [], outOfScope: [], approach: 'a', acceptanceCriteria: [], openItems: [] }).ok).toBe(false);

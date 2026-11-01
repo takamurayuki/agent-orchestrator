@@ -235,3 +235,21 @@ SPEC.md を唯一の要件ベースラインとし、契約の曖昧さ・不整
 
 - **決定:** Tauri コマンド `reveal_worktree(path)` は、`<app-data>/worktrees`（または `AGENT_ORCHESTRATOR_WORKTREES`）配下の既存ディレクトリに正規化後のパスが含まれる場合だけ、OS のファイルマネージャー（Windows: `explorer.exe <path>`）をシェルを介さず起動する。それ以外は拒否。元プロジェクトへの反映（コミット・push）機能は実装しない。
 - **理由:** 結果画面からワークツリーを確認する手段がパスのコピーだけでは非 CLI 利用者に不十分（UX レビュー P0）。一方で UI から任意のパスやコマンドを開く能力は与えない。
+
+## D-38 プロジェクト事前診断は読み取り専用で、判断できない項目は「未確認」として示す（v0.2.0）
+
+- **決定:** プロジェクト選択時（ヒアリング前）に `apps/runner/src/requirements/diagnosis.ts` が、ファイル一覧とテキスト読み取りだけで次を診断する: lockfile（pnpm / lockfileVersion）、Node / pnpm のバージョン（`engines` / `packageManager` とサンドボックスの固定版 node 22.23.4 / pnpm 12.9.1 の比較）、サプライチェーン設定（`minimumReleaseAge`。未設定なら pnpm 12 既定の 24 時間が適用される旨を **unverified** で表示）、インストール時スクリプト（`--ignore-scripts` で実行されない旨を unverified）、ネットワーク（`.npmrc` レジストリ・lockfile の tarball / git ホスト・prisma / playwright 等の取得先と egress allowlist の不一致。レジストリ不一致は fail、取得先は warn）、検証プロファイル、作業ツリー。判定は ready / needs_attention / blocked。fail は problems に載せて開始を止め、warn / unverified は facts としてヒアリングに渡す。設定の自動変更・allowlist の自動拡張は行わない。
+- **理由:** β運用で実行環境起因の失敗（pnpm の minimumReleaseAge、prisma の取得先）がヒアリングと承認の後の起動前検査で初めて分かった。依存解決（ネットワーク）を伴う確認は行わないため、確定できないことは「未確認」と明示し、PASS に見せない。
+- **実測:** `scripts/diagnosis-audit.mjs` を実プロジェクトのコピー 5 件に適用（`test-results/diagnosis-audit.json`、`docs/FINAL_REPORT.md` 0⁹）。
+- **トレードオフ:** `minimumReleaseAge` 未設定のプロジェクトはすべて「要確認」になる（実際に失敗するかは公開日時次第）。開始は妨げない。
+
+## D-39 最小実装の原則とスコープ判定（v0.2.0）
+
+- **決定:** 素案（TaskProposal）に `expectedChanges`（変更が予想されるファイル・領域）と `conflictRisks`（既存機能との衝突の可能性）を加え、task.yaml に引き継ぐ。素案プロンプトは「要件を満たす最小の変更」「Reviewer が実行できない受入条件を書かない」を指示し、Builder プロンプトは期待範囲と「範囲外の変更は最小限にし理由を Out-of-scope changes に書く」を指示する。エンジンは差分取得直後に `scope.ts` で判定し、`RoundRecord.scopeCheck` と `scope.checked` イベントに記録する。major（設定・検証・CI・コンテナ定義など影響の大きいファイルを含む、または予想外が 3 件以上）は検証・レビューを行わず Builder に 1 度返し、残れば `NEEDS_HUMAN / SCOPE_DEVIATION`。完了ゲート 7 でも major を不合格にする。minor（1〜2 件の通常ファイル）は記録して Reviewer に渡すだけ。`expectedChanges` が無い task は判定しない（互換）。
+- **理由:** β運用の要確認 2 件は「依頼より大きな実装（新モジュール追加）」と「既存実装との衝突」。範囲を承認時に固定し、逸脱を機械的に検出して人間の判断に回す。状態機械は変えない（IMPLEMENTING のまま次ラウンドへ、または NEEDS_HUMAN）。
+- **実測:** `scripts/scope-replay.mjs` で過去 8 Run の差分に適用し、人間の判断と 8/8 一致（`test-results/scope-replay.json`）。
+
+## D-40 Verifier と Reviewer の役割整理（v0.2.0）
+
+- **決定:** 自動実行できる検証は Verifier 側へ: 変更された JSON / YAML / Markdown に対する決定的な構造検証（`verification/structure.ts`: 解釈可能、コードフェンスの閉じ、リスト記号の前に文字が付いた行）を検証コマンド `structure` として結果に加え、完了ゲートの必須コマンドに含める（プロファイルのコマンドが失敗した場合は構造検証を行わず、合格を捏造しない）。Reviewer には設計・ロジック・セキュリティ・要件整合性を中心に評価させ、「コマンド実行でしか確認できない条件は requirementsUnverified に挙げる（推測で合格にしない）」「期待範囲外の変更・不要な抽象化を指摘する」を明示。unknown は従来どおり NEEDS_HUMAN（fail-closed）。
+- **理由:** β運用で Reviewer が「ドキュメント再生成を検証できない」として unknown を返した事例と、AI 承認後に人間が見つけた Markdown の体裁崩れ。

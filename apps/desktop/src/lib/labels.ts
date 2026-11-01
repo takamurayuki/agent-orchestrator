@@ -68,6 +68,7 @@ export const REASON_CODE_LABELS: Record<string, string> = {
   BUILDER_TIMEOUT: '実装 CLI がタイムアウト',
   NO_CHANGES: '変更差分なし',
   POLICY_VIOLATION: 'ポリシー違反',
+  SCOPE_DEVIATION: '承認した範囲外の変更',
   WORKSPACE_MODIFIED_DURING_REVIEW: 'レビュー中にワークスペースが変更された',
   TIMEOUT: '制限時間超過',
   GATE_FAILED: '完了ゲート未達',

@@ -477,6 +477,7 @@ export class MockTransport implements Transport {
             ]
           : [],
         requirementsUnverified: unverified,
+        scopeCheck: null,
         reportPath: `${run.runDir}\\report.md`,
         worktreePath: run.worktreePath
       };

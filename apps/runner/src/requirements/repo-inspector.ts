@@ -2,6 +2,7 @@ import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync, type Di
 import { join, relative, resolve, sep } from 'node:path';
 import type { Fact, ProjectInfo } from '@agent-orchestrator/contracts';
 import type { RunnerConfig } from '../config.js';
+import { diagnoseProject } from './diagnosis.js';
 import { checkProfileReadiness } from '../verification/profiles.js';
 import { collectEslintSettings, parseJsonc } from '../policy-gate.js';
 import type { WorkspaceManager } from '../workspace.js';
@@ -79,7 +80,7 @@ export class RepoInspector {
 
   async inspect(inputPath: string): Promise<InspectionResult | InspectionBlocked> {
     const inspectedAt = new Date().toISOString();
-    const baseInfo: ProjectInfo = { path: inputPath, status: 'unusable', gitRoot: null, currentBranch: null, headSha: null, isClean: null, defaultBaseRef: null, packageManager: null, frameworks: [], testFrameworks: [], verificationProfile: null, problems: [], fileCount: 0, inspectedAt };
+    const baseInfo: ProjectInfo = { path: inputPath, status: 'unusable', gitRoot: null, currentBranch: null, headSha: null, isClean: null, defaultBaseRef: null, packageManager: null, frameworks: [], testFrameworks: [], verificationProfile: null, problems: [], fileCount: 0, inspectedAt, diagnosis: { verdict: 'blocked', checks: [] } };
     if (!existsSync(inputPath)) {
       return { ok: false, code: 'NOT_FOUND', message: 'フォルダが存在しません', info: { ...baseInfo, problems: [{ code: 'NOT_FOUND', message: 'フォルダが存在しません', fix: '存在するフォルダを選択してください' }] } };
     }
@@ -254,6 +255,14 @@ export class RepoInspector {
     if (isClean === false) problems.push({ code: 'REPO_DIRTY', message: '未コミットの変更があります', fix: '実行前に commit または stash してください' });
     if (symlinksSkipped.length > 0) problems.push({ code: 'SYMLINKS_SKIPPED', message: `symlink を ${symlinksSkipped.length} 件スキップしました`, fix: null });
 
+    // 事前診断（v0.2.0、D-38）: 読み取り専用。fail は problems にも載せて開始を止める。warn / unverified は facts にしてヒアリングに渡す
+    const workspacePackages = files.filter((f) => /^(apps|packages)\/[^/]+\/package\.json$/.test(f));
+    const diagnosis = diagnoseProject({ files, readText, packageManager, verificationReady: readiness.ready, verificationDetail: readiness.detail, isClean, egressAllowlist: this.config.egressAllowlist, workspacePackages });
+    for (const c of diagnosis.checks) {
+      if (c.status === 'fail' && !['verification', 'worktree'].includes(c.id)) problems.push({ code: `DIAG_${c.id.toUpperCase()}`, message: c.detail, fix: c.fix });
+      if (c.status !== 'ok') fact(`env.${c.id}`, `${c.status === 'unverified' ? '未確認: ' : c.status === 'warn' ? '注意: ' : '問題: '}${c.detail}`, c.id === 'supply_chain' ? 'pnpm-workspace.yaml / .npmrc' : c.id === 'network' ? 'pnpm-lock.yaml / .npmrc / package.json' : 'package.json', c.status === 'unverified' ? 'unknown' : 'confirmed');
+    }
+
     const readmeName = files.find((f) => /^readme(\.md|\.txt)?$/i.test(f));
     const readme = readmeName ? readText(readmeName) : null;
     const digest: RepoDigest = {
@@ -283,7 +292,8 @@ export class RepoInspector {
       verificationProfile: { name: 'node-pnpm', ready: readiness.ready, missingScripts: readiness.missingScripts },
       problems,
       fileCount: files.length,
-      inspectedAt
+      inspectedAt,
+      diagnosis
     };
     return { ok: true, info, facts, digest };
   }

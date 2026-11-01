@@ -9,6 +9,10 @@ export const TaskProposalSchema = z.strictObject({
   outOfScope: z.array(z.string().min(1)),
   approach: z.string().min(1),
   acceptanceCriteria: z.array(AcceptanceCriterionSchema).min(1),
-  openItems: z.array(z.string().min(1))
+  openItems: z.array(z.string().min(1)),
+  /** 変更が予想されるファイル・領域（パス、ディレクトリ、glob。v0.2.0 最小実装の原則）。モデルに必須（1 件以上）。保存済みの旧素案は読み出し時に [] で補う */
+  expectedChanges: z.array(z.string().min(1)).min(1),
+  /** 既存機能・既存実装との衝突の可能性（v0.2.0）。無ければ [] */
+  conflictRisks: z.array(z.string().min(1))
 });
 export type TaskProposal = z.infer<typeof TaskProposalSchema>;

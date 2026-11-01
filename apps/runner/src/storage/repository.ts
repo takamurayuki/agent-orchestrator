@@ -374,7 +374,8 @@ function mapRevision(r: Record<string, unknown>): DraftRevisionRow {
     id: r.id as string,
     draftId: r.draft_id as string,
     revision: r.revision as number,
-    proposal: r.proposal_json ? (JSON.parse(r.proposal_json as string) as TaskProposal) : null,
+    // v0.2.0 以前の素案には expectedChanges / conflictRisks が無い → 読み出し時に補う（スコープ判定は行われない）
+    proposal: r.proposal_json ? ({ expectedChanges: [], conflictRisks: [], ...(JSON.parse(r.proposal_json as string) as Partial<TaskProposal>) } as TaskProposal) : null,
     taskYaml: (r.task_yaml as string | null) ?? null,
     validationErrors: JSON.parse(r.validation_errors_json as string) as string[],
     approved: (r.approved as number) === 1,

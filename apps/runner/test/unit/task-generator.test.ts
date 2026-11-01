@@ -8,7 +8,7 @@ const proposal = {
   outOfScope: ['新規登録'],
   approach: '既存の session ミドルウェアを使う',
   acceptanceCriteria: [{ id: 'AC-001', given: '有効なユーザー', when: '正しい認証情報でログイン', then: 'セッション確立' }],
-  openItems: []
+  openItems: [], expectedChanges: [], conflictRisks: []
 };
 
 describe('task generator (RA-09 / RA-10 / SEC-07 / SEC-10)', () => {

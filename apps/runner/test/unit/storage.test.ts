@@ -117,7 +117,7 @@ describe('FileAndDbRecorder', () => {
     await recorder.createRun(status, snapshot({ approvedTaskId: status.approvedTaskId }));
     await recorder.appendEvent({ runId: 'RUN-F', type: 'run.created', round: null, payload: { token: 'ANTHROPIC_API_KEY=sk-ant-api03-secretsecretsecret' } });
     await recorder.saveArtifact('RUN-F', 1, 'builder.log', 'export OPENAI_API_KEY=sk-proj-abcdefghijklmnopqrstu\nok');
-    await recorder.saveRound('RUN-F', { round: 1, builder: null, diff: null, policyViolations: [], policyFindings: [], verification: null, review: null, workspaceHashBeforeReview: null, workspaceHashAfterReview: null, startedAt: 't', finishedAt: null });
+    await recorder.saveRound('RUN-F', { round: 1, builder: null, diff: null, scopeCheck: null, policyViolations: [], policyFindings: [], verification: null, review: null, workspaceHashBeforeReview: null, workspaceHashAfterReview: null, startedAt: 't', finishedAt: null });
     await recorder.saveReport('RUN-F', '# report');
     await recorder.updateStatus({ ...status, state: 'COMPLETED' });
     const runDir = join(runsDir, 'RUN-F');

@@ -48,6 +48,29 @@
     <h3>進め方（実装方針）</h3>
     <p data-testid="overview-approach">{p.approach}</p>
 
+    <h3>変更が予想されるファイル・領域</h3>
+    {#if p.expectedChanges.length === 0}
+      <p class="muted" data-testid="overview-expected-changes">指定なし（AI の変更範囲は判定されません）</p>
+    {:else}
+      <ul data-testid="overview-expected-changes">
+        {#each p.expectedChanges as e, i (i)}
+          <li><code>{e}</code></li>
+        {/each}
+      </ul>
+      <p class="small muted">この範囲の外に大きな変更があった場合、AI は検証・レビューの前に止まり、人の判断を求めます。</p>
+    {/if}
+
+    <h3>既存機能との衝突の可能性</h3>
+    {#if p.conflictRisks.length === 0}
+      <p class="muted" data-testid="overview-conflict-risks">特定されていません</p>
+    {:else}
+      <ul data-testid="overview-conflict-risks">
+        {#each p.conflictRisks as r, i (i)}
+          <li>{r}</li>
+        {/each}
+      </ul>
+    {/if}
+
     <h3>確認方法（テスト）</h3>
     {#if draft.verificationReadiness}
       <p data-testid="overview-verification">

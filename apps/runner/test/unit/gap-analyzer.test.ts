@@ -101,16 +101,16 @@ describe('gap analyzer (SPEC §4.1)', () => {
     expect(qs[0]).toMatchObject({ id: 'CONTRA-CONTRA-003', round: 2, decisionImpact: 'blocking' });
     expect(qs[0]?.question).toContain('e1');
     expect(qs[0]?.options[0]?.label).toBe('A — ca');
-    const prompt = renderContradictionPrompt({ request: 'req', facts: [], digestText: '', askedQuestions: [], answers: [], prohibitedOperations: [], summary: 's', proposal: { title: 't', objective: 'o', requirements: ['r1'], outOfScope: [], approach: 'a', acceptanceCriteria: [{ id: 'AC-1', given: 'g', when: 'w', then: 't' }], openItems: [] }, decisions: [{ topicKey: 'CONTRA-001', contradictionId: 'CONTRA-001', source: 'contradiction', kind: 'requirement_vs_project', question: 'q', options: [], chosen: 'a', chosenLabel: 'A', rationale: 'r', consequence: 'ca', evidence: [], relatedRequirements: [], decidedAt: 't', history: [], supersededBy: null, status: 'active' }] });
+    const prompt = renderContradictionPrompt({ request: 'req', facts: [], digestText: '', askedQuestions: [], answers: [], prohibitedOperations: [], summary: 's', proposal: { title: 't', objective: 'o', requirements: ['r1'], outOfScope: [], approach: 'a', acceptanceCriteria: [{ id: 'AC-1', given: 'g', when: 'w', then: 't' }], openItems: [], expectedChanges: [], conflictRisks: [] }, decisions: [{ topicKey: 'CONTRA-001', contradictionId: 'CONTRA-001', source: 'contradiction', kind: 'requirement_vs_project', question: 'q', options: [], chosen: 'a', chosenLabel: 'A', rationale: 'r', consequence: 'ca', evidence: [], relatedRequirements: [], decidedAt: 't', history: [], supersededBy: null, status: 'active' }] });
     expect(prompt).toContain('Binding decisions');
     expect(prompt).toContain('[contradiction:CONTRA-001]');
     expect(prompt).toContain('"r1"');
   });
 
   it('RA-15: vague acceptance criteria (missing then) are rejected', () => {
-    const r = validateProposal({ title: 't', objective: 'o', requirements: ['r'], outOfScope: [], approach: 'a', acceptanceCriteria: [{ id: 'AC-1', given: 'g', when: 'w' }], openItems: [] });
+    const r = validateProposal({ title: 't', objective: 'o', requirements: ['r'], outOfScope: [], approach: 'a', acceptanceCriteria: [{ id: 'AC-1', given: 'g', when: 'w' }], openItems: [], expectedChanges: [], conflictRisks: [] });
     expect(r.ok).toBe(false);
-    const dup = validateProposal({ title: 't', objective: 'o', requirements: ['r'], outOfScope: [], approach: 'a', acceptanceCriteria: [{ id: 'AC-1', given: 'g', when: 'w', then: 't' }, { id: 'AC-1', given: 'g', when: 'w', then: 't' }], openItems: [] });
+    const dup = validateProposal({ title: 't', objective: 'o', requirements: ['r'], outOfScope: [], approach: 'a', acceptanceCriteria: [{ id: 'AC-1', given: 'g', when: 'w', then: 't' }, { id: 'AC-1', given: 'g', when: 'w', then: 't' }], openItems: [], expectedChanges: [], conflictRisks: [] });
     expect(dup.ok).toBe(false);
   });
 });

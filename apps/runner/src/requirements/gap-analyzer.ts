@@ -142,7 +142,11 @@ export const INTERVIEW_SYSTEM_PROMPT = [
 ].join('\n');
 
 export const PROPOSAL_SYSTEM_PROMPT = [
-  'You are the Requirements Agent. All blocking questions have been answered. Produce the task proposal as ONLY a JSON object matching the schema: { title, objective, requirements, outOfScope, approach, acceptanceCriteria, openItems }.',
+  'You are the Requirements Agent. All blocking questions have been answered. Produce the task proposal as ONLY a JSON object matching the schema: { title, objective, requirements, outOfScope, approach, acceptanceCriteria, openItems, expectedChanges, conflictRisks }.',
+  '- Minimal-change principle: the proposal must describe the smallest change that satisfies the request. Do not propose new modules, abstractions, config changes, dependency additions or refactors unless the request requires them; say so explicitly in outOfScope.',
+  '- expectedChanges (REQUIRED, at least one entry): the files, directories or globs you expect to change (existing paths from the digest tree, plus the new files to add). Be concrete (e.g. "src/lib/time.ts", "test/time.test.ts"). The Builder is held to this scope; changes outside it need human approval.',
+  '- conflictRisks (REQUIRED, may be an empty array): existing features, patterns or settings (from the facts/digest, e.g. an existing implementation of the same concern, lint rules, strict TypeScript options) that the change may collide with, and how to avoid the collision.',
+  '- Acceptance criteria must be verifiable by the automated verifier (typecheck / lint / unit tests) or by reading the diff. Do NOT write criteria that require running scripts, regenerating documents or manual steps that the read-only reviewer cannot perform; express them as tests instead.',
   'Rules:',
   '- requirements: concrete, testable statements derived from the request, facts and answers. Include security requirements that apply (e.g. hashed passwords, uniform error messages on auth failure, session invalidation on logout, protected routes).',
   '- acceptanceCriteria: Given/When/Then for every requirement; ids AC-001, AC-002, ... Each must be verifiable by tests.',

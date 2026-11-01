@@ -74,6 +74,7 @@ try {
         review: r.review ? { verdict: r.review.parsed?.verdict ?? null, parseError: r.review.parseError, durationMs: r.review.durationMs, findings: r.review.parsed?.findings.map((f) => `[${f.severity}] ${f.id} ${f.file}:${f.line} ${f.description}`) ?? [], unverified: r.review.parsed?.requirementsUnverified ?? [], summary: r.review.parsed?.summary ?? null } : null,
         hashMatch: r.workspaceHashBeforeReview !== null && r.workspaceHashBeforeReview === r.workspaceHashAfterReview,
         policyFindings: (r.policyFindings ?? []).map((p) => `[${p.severity}${p.approved ? '/approved' : ''}] ${p.ruleId} ${p.file}:${p.line} ${p.evidence}`),
+        scopeCheck: r.scopeCheck ?? null,
         feedbackArtifact: existsSync(join(final.runDir, 'rounds', String(r.round), 'feedback.json')) ? JSON.parse(readFileSync(join(final.runDir, 'rounds', String(r.round), 'feedback.json'), 'utf8')) : null
       });
     }

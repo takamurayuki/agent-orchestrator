@@ -132,5 +132,35 @@
     "agrees": true,
     "notes": "指標 1 行の追加依頼に対し、Builder が新モジュール（quality-metrics.mjs / .d.mts）とテストを追加してスコープが膨張。Round 1〜2 の Codex 指摘（保存 Run 記録を読まない、複数 Run の集計）は、機械回答で選んだ選択肢（先頭）と要件文の曖昧さに起因する解釈差で、Round 3 は Codex が unknown（判定不能）を返し REVIEW_UNKNOWN で停止。Builder 合計 $0.66、730 秒。人間が見ると『dogfood JSON だけを対象に 1 行追加』で足りた。依頼の粒度とヒアリング回答の影響が大きい例。",
     "missed": []
+  },
+  "v020-sample-greet-upper": {
+    "verdict": "approved",
+    "agrees": true,
+    "notes": "greetLoud は要件どおり（大文字化、空文字→固定文言、文字列連結）。テスト 3 件。構造検証（structure）が検証結果に加わり exit 0。人間の指摘なし。※この Run では素案の expectedChanges がモデル出力に含まれず（JSON スキーマで任意扱いだったため）スコープ判定は行われなかった → スキーマで必須化して再実行（v020b-）。",
+    "missed": []
+  },
+  "v020-self-quality-avg-cost": {
+    "verdict": "needs_human",
+    "agrees": true,
+    "notes": "β運用と同じ依頼。expectedChanges が空だったためスコープ判定なし。Builder は再び新モジュール（quality-report-cost.mjs）とテストを追加。Reviewer は改訂前のルールで unknown を返し REVIEW_UNKNOWN で 1 ラウンド停止（β時は 3 ラウンド $0.66 → 今回 1 ラウンド $0.16、367 秒）。unverified の 3 件は『実行しないと確認できない』受入条件。→ expectedChanges 必須化と Reviewer ルール改訂（unverified は changes_requested）後に再実行（v020b-）。",
+    "missed": []
+  },
+  "v020b-sample-greet-upper": {
+    "verdict": "approved",
+    "agrees": true,
+    "notes": "改善後の素案は expectedChanges（src/greet.ts, test/greet.test.ts）と conflictRisks（greet 本体は変更しない、lint ルール、strict）を含み、差分は範囲内（scope none）。構造検証 OK、1 ラウンドで完了、$0.04。人間の指摘なし。",
+    "missed": []
+  },
+  "v020b-self-quality-avg-cost": {
+    "verdict": "needs_human",
+    "agrees": true,
+    "notes": "改善後: 素案に expectedChanges（quality-report.mjs, QUALITY_REPORT.md, テスト）と conflictRisks（既存指標を変えない等）が付き、Builder の差分はスコープ判定で minor（新モジュール 1 + テスト 1 の 2 件。tests/ の自由記述エントリは句点で区切れず不一致 → 修正）。Reviewer は改訂ルールにより unknown ではなく changes_requested を 3 回返し、指摘は一貫して「生成済み docs/QUALITY_REPORT.md が更新されていない（AC-006）」。素案プロンプトの『実行が必要な受入条件を書かない』指示にもかかわらず AC-006 がドキュメント再生成を要求しており、Builder はスクリプトを実行しなかった。結果は NEEDS_HUMAN / MAX_ROUNDS だが、β時（3 ラウンド $0.66、730 秒、unknown）に比べ $0.26・494 秒・理由が明確。残課題: 受入条件が生成物の更新を要求する場合は、Builder に生成コマンドの実行を促すか素案段階で除外する。",
+    "missed": []
+  },
+  "v020b-self-report-policy-warning": {
+    "verdict": "approved",
+    "agrees": true,
+    "notes": "改善後: expectedChanges（report.ts, report.test.ts）どおりの差分（scope none）。出力は『- [注意] …』の形でリスト記号を先頭に置いており、β時の体裁崩れ（接頭辞がリスト記号の前）は再発しなかった。Reviewer approved、1 ラウンド、$0.15。",
+    "missed": []
   }
 }

@@ -75,6 +75,25 @@
                 </ul>
               </Alert>
             {/if}
+            {#if p.diagnosis.checks.length > 0}
+              <section class="diagnosis" aria-labelledby="diagnosis-heading" data-testid="project-diagnosis" data-verdict={p.diagnosis.verdict}>
+                <div class="row" style="justify-content: space-between">
+                  <h3 id="diagnosis-heading">事前診断（ヒアリング前の確認）</h3>
+                  <StatusBadge label={p.diagnosis.verdict === 'ready' ? '実行可能' : p.diagnosis.verdict === 'needs_attention' ? '要確認' : '実行不可'} tone={p.diagnosis.verdict === 'ready' ? 'success' : p.diagnosis.verdict === 'needs_attention' ? 'warning' : 'danger'} testid="diagnosis-verdict" />
+                </div>
+                <p class="small muted">読み取り専用で調べた結果です。「未確認」は実際に依存解決しないと分からない項目で、実行時に失敗する可能性があります。設定の自動変更は行いません。</p>
+                <ul class="checks">
+                  {#each p.diagnosis.checks as c (c.id)}
+                    <li data-testid="diagnosis-check" data-status={c.status}>
+                      <StatusBadge label={c.status === 'ok' ? '正常' : c.status === 'warn' ? '注意' : c.status === 'fail' ? '問題' : '未確認'} tone={c.status === 'ok' ? 'success' : c.status === 'warn' ? 'warning' : c.status === 'fail' ? 'danger' : 'neutral'} />
+                      <strong>{c.label}</strong>
+                      <div class="small">{c.detail}</div>
+                      {#if c.fix}<div class="small"><strong>対処:</strong> {c.fix}</div>{/if}
+                    </li>
+                  {/each}
+                </ul>
+              </section>
+            {/if}
             <dl>
               <dt>パス</dt>
               <dd>{p.path}</dd>

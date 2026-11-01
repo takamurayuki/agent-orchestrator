@@ -206,7 +206,8 @@ export class RunService {
       reportPath,
       worktreePath: run.worktreePath,
       egress: summarizeEgress(join(run.runDir, 'egress.jsonl')),
-      policyFindings: last?.policyFindings ?? []
+      policyFindings: last?.policyFindings ?? [],
+      scopeCheck: last?.scopeCheck ?? null
     };
   }
 

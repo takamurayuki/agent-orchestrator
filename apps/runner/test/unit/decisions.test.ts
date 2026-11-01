@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { DecisionRecord } from '@agent-orchestrator/contracts';
 import { decisionFromContradiction, decisionFromInterviewAnswer, decisionsFromRevision, findConflicts, makeDecision, matchRequirements, renderBindingDecisions, resolveConflicts, retractDecision, upgradeDecision } from '../../src/requirements/decisions.js';
 
-const proposal = { title: 't', objective: 'o', requirements: ['メールアドレスとパスワードで認証する', 'ログアウトでセッションを無効化する'], outOfScope: [], approach: 'a', acceptanceCriteria: [{ id: 'AC-001', given: 'g', when: 'w', then: 't' }], openItems: [] };
+const proposal = { title: 't', objective: 'o', requirements: ['メールアドレスとパスワードで認証する', 'ログアウトでセッションを無効化する'], outOfScope: [], approach: 'a', acceptanceCriteria: [{ id: 'AC-001', given: 'g', when: 'w', then: 't' }], openItems: [], expectedChanges: [], conflictRisks: [] };
 const mk = (topicKey: string, chosen: string, decidedAt: string, extra: Partial<DecisionRecord> = {}): DecisionRecord =>
   makeDecision({ topicKey, source: 'interview', kind: 'other', question: `q ${topicKey}`, options: [], chosen, chosenLabel: chosen, rationale: 'r', consequence: 'c', evidence: [], relatedRequirements: [], decidedAt, ...extra }, null);
 

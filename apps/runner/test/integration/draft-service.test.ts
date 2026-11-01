@@ -57,7 +57,9 @@ const defaultProposal = {
     { id: 'AC-001', given: '有効なユーザー', when: '正しい認証情報でログイン', then: 'セッションが確立する' },
     { id: 'AC-002', given: '未認証', when: '保護画面にアクセス', then: '拒否される' }
   ],
-  openItems: []
+  openItems: [],
+  expectedChanges: ['src/server/auth/login.ts', 'src/server/auth/login.test.ts'],
+  conflictRisks: []
 };
 const q = (id: string, impact: 'blocking' | 'non_blocking', text: string) => ({ id, question: text, decisionImpact: impact, options: [{ value: 'a', label: 'A 案' }, { value: 'b', label: 'B 案' }], recommendation: 'A 案を推奨。理由: 既存方式。リスク: なし' });
 // 契約上 1 ラウンド最大 3 問。4 問以上は複数ラウンドに分かれる（UI-05）
@@ -120,7 +122,7 @@ describe('DraftService conversation state machine (SPEC §5)', () => {
     expect(view.currentQuestions.map((x) => x.id)).toEqual(['Q-004']); // 再評価で質問が更新される
     expect(view.totalQuestionsAsked).toBe(4);
     view = await svc.answer({ draftId: view.id, answers: answerAll(view, '自由入力の回答') });
-    expect(view.state).toBe('AWAITING_APPROVAL');
+    expect(view.state, view.blockedReason ?? view.validationErrors.join('; ')).toBe('AWAITING_APPROVAL');
     expect(view.proposal?.title).toBe('メール・パスワードログイン');
     expect(view.taskYaml).toContain('schemaVersion: 2');
     expect(view.validationErrors).toEqual([]);
@@ -155,7 +157,7 @@ describe('DraftService conversation state machine (SPEC §5)', () => {
     const svc = service(model);
     let view = await svc.create({ projectPath: repo, request: 'ログイン' });
     view = await svc.answer({ draftId: view.id, answers: answerAll(view, 'a') });
-    expect(view.state).toBe('AWAITING_APPROVAL');
+    expect(view.state, view.blockedReason ?? view.validationErrors.join('; ')).toBe('AWAITING_APPROVAL');
     view = await svc.answer({ draftId: view.id, back: true });
     expect(view.state).toBe('ASKING');
     expect(view.proposal).toBeNull();
@@ -194,7 +196,7 @@ describe('DraftService conversation state machine (SPEC §5)', () => {
     const spy: InterviewModel = { interview: async (r, s) => { seen = r.digestText; return model.interview(r, s); }, propose: (r, s) => model.propose(r, s), detectContradictions: (r, s) => model.detectContradictions(r, s) };
     const view = await service(spy).create({ projectPath: repo, request: 'ログイン' });
     expect(seen).toContain('<untrusted_repository_content');
-    expect(view.state).toBe('AWAITING_APPROVAL');
+    expect(view.state, view.blockedReason ?? view.validationErrors.join('; ')).toBe('AWAITING_APPROVAL');
   });
 
   it('SEC-10: requests that demand push/merge/deploy are flagged and such requirements are rejected at approval', async () => {
@@ -220,7 +222,7 @@ describe('DraftService conversation state machine (SPEC §5)', () => {
   it('AUD-01 / RA-11 / RA-12: approve writes immutable YAML; revise afterwards creates a new unapproved revision', async () => {
     const svc = service(new ScriptedModel([done]));
     let view = await svc.create({ projectPath: repo, request: 'ログイン' });
-    expect(view.state).toBe('AWAITING_APPROVAL');
+    expect(view.state, view.blockedReason ?? view.validationErrors.join('; ')).toBe('AWAITING_APPROVAL');
     await expect(svc.approve({ draftId: view.id, revision: view.revision + 1, acknowledgeDataSharing: true })).rejects.toMatchObject({ code: 'INVALID_STATE' });
     const approved = await svc.approve({ draftId: view.id, revision: view.revision, acknowledgeDataSharing: true });
     expect(approved.draft.state).toBe('READY_TO_RUN');
@@ -234,7 +236,7 @@ describe('DraftService conversation state machine (SPEC §5)', () => {
     view = await svc.revise({ draftId: view.id, edits: { requirements: ['メールアドレスとパスワードで認証する', 'ログイン失敗時のメッセージを統一する'] } });
     expect(view.revision).toBe(approved.draft.revision + 1);
     expect(view.approved).toBe(false);
-    expect(view.state).toBe('AWAITING_APPROVAL');
+    expect(view.state, view.blockedReason ?? view.validationErrors.join('; ')).toBe('AWAITING_APPROVAL');
     expect(view.approvedTaskId).toBeNull();
     expect(view.taskYaml).toContain('ログイン失敗時のメッセージを統一する');
     // 旧 revision は不変
@@ -274,7 +276,7 @@ describe('DraftService conversation state machine (SPEC §5)', () => {
       expect(q1.history[0]).toMatchObject({ chosen: 'a', retracted: true });
       // 素案生成には active な判断だけが拘束条件として渡る
       view = await svc.answer({ draftId: view.id, answers: answerAll(view) });
-      expect(view.state).toBe('AWAITING_APPROVAL');
+      expect(view.state, view.blockedReason ?? view.validationErrors.join('; ')).toBe('AWAITING_APPROVAL');
       const passed = model.proposalRequests.at(-1)!.decisions;
       expect(passed.every((d) => d.status === 'active')).toBe(true);
       expect(passed.map((d) => d.topicKey).sort()).toEqual(['Q-001', 'Q-002', 'Q-003', 'Q-004']);
@@ -288,7 +290,7 @@ describe('DraftService conversation state machine (SPEC §5)', () => {
       const model = new ScriptedModel([done], defaultProposal);
       const svc = service(model);
       let view = await svc.create({ projectPath: repo, request: 'x' });
-      expect(view.state).toBe('AWAITING_APPROVAL');
+      expect(view.state, view.blockedReason ?? view.validationErrors.join('; ')).toBe('AWAITING_APPROVAL');
       view = await svc.revise({ draftId: view.id, edits: { requirements: [...defaultProposal.requirements, 'ログイン失敗を 5 回で一時ロックする'], approach: '既存の規約に従う（ロックは DB カラムで管理）' } });
       const rev = view.decisions.filter((d) => d.source === 'revision');
       expect(rev.map((d) => d.topicKey).sort()).toEqual(['revision:approach', 'revision:requirements']);
@@ -319,7 +321,7 @@ describe('DraftService conversation state machine (SPEC §5)', () => {
       const svc = service(model);
       let view = await svc.create({ projectPath: repo, request: 'x' });
       view = await svc.answer({ draftId: view.id, answers: [{ questionId: 'Q-001', value: 'a', skipped: false }] });
-      expect(view.state).toBe('AWAITING_APPROVAL');
+      expect(view.state, view.blockedReason ?? view.validationErrors.join('; ')).toBe('AWAITING_APPROVAL');
       view = await svc.revise({ draftId: view.id, edits: { approach: 'Cookie セッションに変更' } });
       expect(view.decisions.map((d) => d.topicKey).sort()).toEqual(['Q-001', 'revision:approach']);
       // 修正だけでは機械的に矛盾と断定できない（両方 active）。次の再評価（戻る→再回答）で矛盾検出が判断同士の矛盾を報告する
@@ -328,7 +330,7 @@ describe('DraftService conversation state machine (SPEC §5)', () => {
       expect(view.state).toBe('ASKING');
       expect(view.currentQuestions[0]?.id).toBe('CONTRA-CONTRA-010');
       view = await svc.answer({ draftId: view.id, answers: [{ questionId: 'CONTRA-CONTRA-010', value: 'keep_rev', skipped: false }] });
-      expect(view.state).toBe('AWAITING_APPROVAL');
+      expect(view.state, view.blockedReason ?? view.validationErrors.join('; ')).toBe('AWAITING_APPROVAL');
       const byTopic = Object.fromEntries(view.decisions.map((d) => [d.topicKey, d]));
       expect(byTopic['Q-001']).toMatchObject({ status: 'superseded', supersededBy: 'CONTRA-010' });
       expect(byTopic['Q-001']?.history.at(-1)?.note).toContain('CONTRA-010');
@@ -384,7 +386,7 @@ describe('DraftService conversation state machine (SPEC §5)', () => {
       const svc = service(model);
       let view = await svc.create({ projectPath: repo, request: '必ずテンプレートリテラルで実装してほしい' });
       view = await svc.answer({ draftId: view.id, answers: [{ questionId: 'CONTRA-CONTRA-001', value: 'follow_lint', skipped: false }] });
-      expect(view.state).toBe('AWAITING_APPROVAL');
+      expect(view.state, view.blockedReason ?? view.validationErrors.join('; ')).toBe('AWAITING_APPROVAL');
       expect(view.contradictions).toEqual([]);
       expect(view.decisions).toHaveLength(1);
       expect(view.decisions[0]).toMatchObject({ topicKey: 'CONTRA-001', contradictionId: 'CONTRA-001', source: 'contradiction', kind: 'requirement_vs_project', chosen: 'follow_lint', chosenLabel: 'プロジェクト規約に従い文字列連結で実装する', status: 'active', history: [], supersededBy: null });
@@ -416,13 +418,13 @@ describe('DraftService conversation state machine (SPEC §5)', () => {
       view = await svc.answer({ draftId: view.id, back: true });
       expect(view.state).toBe('ASKING');
       view = await svc.answer({ draftId: view.id, answers: [{ questionId: 'CONTRA-CONTRA-001', value: 'follow_lint', skipped: false }] });
-      expect(view.state).toBe('AWAITING_APPROVAL');
+      expect(view.state, view.blockedReason ?? view.validationErrors.join('; ')).toBe('AWAITING_APPROVAL');
       expect(view.decisions).toHaveLength(1);
       view = await svc.answer({ draftId: view.id, back: true });
       // v2.2: 削除ではなく retracted として履歴に残る
       expect(view.decisions.map((d) => d.status)).toEqual(['retracted']);
       view = await svc.answer({ draftId: view.id, answers: [{ questionId: 'CONTRA-CONTRA-001', value: 'change_rule', skipped: false }] });
-      expect(view.state).toBe('AWAITING_APPROVAL');
+      expect(view.state, view.blockedReason ?? view.validationErrors.join('; ')).toBe('AWAITING_APPROVAL');
       expect(view.decisions).toHaveLength(1);
       expect(view.decisions[0]).toMatchObject({ topicKey: 'CONTRA-001', chosen: 'change_rule', status: 'active' });
       expect(view.decisions[0]?.history).toEqual([expect.objectContaining({ chosen: 'follow_lint', retracted: true })]);
@@ -432,7 +434,7 @@ describe('DraftService conversation state machine (SPEC §5)', () => {
       const minorOnly = { contradictions: [conflict.contradictions[1]] };
       const svc = service(new ScriptedModel([done], defaultProposal, minorOnly));
       const view = await svc.create({ projectPath: repo, request: 'x' });
-      expect(view.state).toBe('AWAITING_APPROVAL');
+      expect(view.state, view.blockedReason ?? view.validationErrors.join('; ')).toBe('AWAITING_APPROVAL');
       expect(view.proposal?.openItems.some((o) => o.includes('軽微な矛盾'))).toBe(true);
     });
 

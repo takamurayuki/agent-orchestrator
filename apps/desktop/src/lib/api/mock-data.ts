@@ -127,7 +127,38 @@ export function inspectProject(path: string): ProjectInfo {
         }
       ],
       fileCount: 0,
-      inspectedAt: now
+      inspectedAt: now,
+      diagnosis: { verdict: 'blocked', checks: [] }
+    };
+  }
+  if (lower.includes('policy')) {
+    return {
+      path,
+      status: 'ok',
+      gitRoot: path,
+      currentBranch: 'main',
+      headSha: 'c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00',
+      isClean: true,
+      defaultBaseRef: 'main',
+      packageManager: 'pnpm',
+      frameworks: ['Express 4'],
+      testFrameworks: ['vitest'],
+      verificationProfile: { name: 'node-pnpm', ready: true, missingScripts: [] },
+      problems: [],
+      fileCount: 96,
+      inspectedAt: now,
+      diagnosis: {
+        verdict: 'needs_attention',
+        checks: [
+          { id: 'lockfile', label: 'lockfile', status: 'ok', detail: 'pnpm-lock.yaml（lockfileVersion 9.0）', fix: null },
+          { id: 'node', label: 'Node.js バージョン', status: 'ok', detail: 'engines.node ">=20" はサンドボックスの Node 22.23.4 を満たします', fix: null },
+          { id: 'pnpm', label: 'pnpm バージョン', status: 'ok', detail: 'packageManager pnpm@12.9.1（サンドボックスは pnpm 12.9.1。同じメジャー）', fix: null },
+          { id: 'supply_chain', label: 'サプライチェーン設定（minimumReleaseAge）', status: 'unverified', detail: 'プロジェクトに設定が無いため、サンドボックスの pnpm 12.9.1 の既定（公開から 24 時間未満のパッケージを拒否）が適用されます。lockfile に直近 24 時間以内に公開されたパッケージがあると install が失敗します（公開日時は依存解決しないと分からないため未確認）', fix: 'pnpm-workspace.yaml に minimumReleaseAge / minimumReleaseAgeExclude を明示するか、依存を更新してから 1 日空けて実行してください' },
+          { id: 'install_scripts', label: 'インストール時スクリプト', status: 'unverified', detail: 'apps/server/package.json#postinstall は --ignore-scripts のため実行されません。生成物に依存する検証は失敗する可能性があります（実行しないと分からないため未確認）', fix: '検証コマンド（typecheck / lint / test:run）がインストールスクリプト無しで通ることを確認してください' },
+          { id: 'network', label: 'ネットワーク（allowlist）', status: 'warn', detail: '検証中に allowlist 外への通信が必要になる可能性: binaries.prisma.sh（prisma generate が Prisma エンジンを取得する: prisma）。遮断されるため該当コマンドは失敗します', fix: '該当の生成物をコミットする、または検証コマンドからその手順を外してください。allowlist は自動で広げません' },
+          { id: 'verification', label: '検証プロファイル node-pnpm', status: 'ok', detail: '実行可能', fix: null }
+        ]
+      }
     };
   }
   if (lower.includes('dirty')) {
@@ -156,7 +187,15 @@ export function inspectProject(path: string): ProjectInfo {
         }
       ],
       fileCount: 388,
-      inspectedAt: now
+      inspectedAt: now,
+      diagnosis: {
+        verdict: 'blocked',
+        checks: [
+          { id: 'lockfile', label: 'lockfile', status: 'ok', detail: 'pnpm-lock.yaml（lockfileVersion 9.0）', fix: null },
+          { id: 'verification', label: '検証プロファイル node-pnpm', status: 'fail', detail: 'scripts 不足: lint', fix: 'package.json に typecheck / lint / test:run を定義し、pnpm-lock.yaml を用意してください' },
+          { id: 'worktree', label: '作業ツリー', status: 'fail', detail: '未コミットの変更があります（ベース SHA を固定できません）', fix: '実行前に commit または stash してください' }
+        ]
+      }
     };
   }
   return {
@@ -173,7 +212,19 @@ export function inspectProject(path: string): ProjectInfo {
     verificationProfile: { name: 'node-pnpm', ready: true, missingScripts: [] },
     problems: [],
     fileCount: 412,
-    inspectedAt: now
+    inspectedAt: now,
+    diagnosis: {
+      verdict: 'ready',
+      checks: [
+        { id: 'lockfile', label: 'lockfile', status: 'ok', detail: 'pnpm-lock.yaml（lockfileVersion 9.0）', fix: null },
+        { id: 'node', label: 'Node.js バージョン', status: 'ok', detail: 'engines.node ">=20" はサンドボックスの Node 22.23.4 を満たします', fix: null },
+        { id: 'pnpm', label: 'pnpm バージョン', status: 'ok', detail: 'packageManager pnpm@12.9.1（サンドボックスは pnpm 12.9.1。同じメジャー）', fix: null },
+        { id: 'supply_chain', label: 'サプライチェーン設定（minimumReleaseAge）', status: 'ok', detail: 'minimumReleaseAge = 1440 分（プロジェクト設定、pnpm-workspace.yaml）', fix: null },
+        { id: 'install_scripts', label: 'インストール時スクリプト', status: 'ok', detail: 'preinstall / postinstall / prepare なし', fix: null },
+        { id: 'network', label: 'ネットワーク（allowlist）', status: 'ok', detail: '必要な通信先は allowlist 内（api.anthropic.com, api.openai.com, registry.npmjs.org）に収まる見込み', fix: null },
+        { id: 'verification', label: '検証プロファイル node-pnpm', status: 'ok', detail: '実行可能', fix: null }
+      ]
+    }
   };
 }
 
@@ -340,7 +391,9 @@ export function buildProposal(request: string, answers: Answer[]): TaskProposal 
       (placement?.value === 'modal' ? ' ログイン UI はヘッダーのモーダルとして実装する。' : ' ログイン UI は src/routes/login/+page.svelte として実装する。') +
       ' hooks.server.ts で保護ルートのガードを追加し、Vitest で API、Playwright でログイン導線を検証する。',
     acceptanceCriteria,
-    openItems
+    openItems,
+    expectedChanges: ['src/server/auth/login.ts', 'src/server/auth/login.test.ts', 'src/routes/login/+page.svelte', 'src/routes/login/+page.server.ts', 'src/hooks.server.ts', 'e2e/login.spec.ts'],
+    conflictRisks: ['既存の express-session 設定（src/server/app.ts）を変更せずに利用すること', 'users テーブルのスキーマ（src/db/schema.ts）は変更しない']
   };
 }
 
@@ -506,6 +559,7 @@ export function seedHistory(): Array<{ run: RunStatus; report: RunReportResult }
         requirementsUnverified: [],
         egress: { available: true, allowed: 14, denied: 2, errors: 0, allowedHosts: ['api.anthropic.com', 'chatgpt.com', 'registry.npmjs.org'], deniedHosts: [{ host: 'ab.chatgpt.com', count: 2 }], errorHosts: [] },
         policyFindings: [],
+        scopeCheck: null,
         reportPath: completed.runDir + '\\report.md',
         worktreePath: completed.worktreePath
       }
@@ -544,6 +598,7 @@ export function seedHistory(): Array<{ run: RunStatus; report: RunReportResult }
         requirementsUnverified: ['Excel で開いた際に文字化けしないこと（BOM 付き UTF-8）'],
         egress: { available: true, allowed: 14, denied: 2, errors: 0, allowedHosts: ['api.anthropic.com', 'chatgpt.com', 'registry.npmjs.org'], deniedHosts: [{ host: 'ab.chatgpt.com', count: 2 }], errorHosts: [] },
         policyFindings: [],
+        scopeCheck: null,
         reportPath: needsHuman.runDir + '\\report.md',
         worktreePath: needsHuman.worktreePath
       }

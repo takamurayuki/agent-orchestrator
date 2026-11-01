@@ -41,7 +41,11 @@ export const TaskSchema = z.strictObject({
   acceptanceCriteria: z.array(AcceptanceCriterionSchema).min(1),
   verificationProfile: z.enum(VERIFICATION_PROFILES),
   limits: TaskLimitsSchema.optional(),
-  review: TaskReviewSchema.optional()
+  review: TaskReviewSchema.optional(),
+  /** 変更が予想されるファイル・領域（v0.2.0）。空ならスコープ判定を行わない */
+  expectedChanges: z.array(z.string().min(1)).optional(),
+  /** 既存機能との衝突の可能性（v0.2.0、Builder / Reviewer への注意喚起） */
+  conflictRisks: z.array(z.string().min(1)).optional()
 });
 export type Task = z.infer<typeof TaskSchema>;
 export type TaskInput = z.input<typeof TaskSchema>;

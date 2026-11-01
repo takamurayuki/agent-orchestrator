@@ -1,9 +1,9 @@
 # 受入テスト結果
 
-生成: 2026-11-01T11:15:21.009Z
+生成: 2026-11-01T16:02:48.038Z
 
-- Vitest: 209/210 passed
-- Playwright: 26/26 passed
+- Vitest: 238/239 passed
+- Playwright: 29/29 passed
 - 集計: PASS 56 / FAIL 0 / NOT_RUN 0
 
 PASS = 対応する自動テストがすべて成功。FAIL = 1 件以上失敗。NOT_RUN = 対応テストの実行結果なし（LIVE は実機未実施）。

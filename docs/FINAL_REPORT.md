@@ -2,6 +2,39 @@
 
 作成日: 2026-11-01（リリース準備フェーズ後に更新）　対象: `docs/SPEC.md` v2.0　受入結果: `docs/ACCEPTANCE_REPORT.md`（**PASS 56 / FAIL 0 / NOT_RUN 0**）
 
+## 0⁹. v0.2.0 βフィードバック改善の結果（2026-11-02 追記）
+
+### 実装概要
+
+| Phase | 内容 | 決定記録 |
+|---|---|---|
+| 1 事前診断（P0） | プロジェクト選択直後に `requirements/diagnosis.ts` が読み取り専用で lockfile（pnpm / lockfileVersion）、Node・pnpm 版（`engines` / `packageManager` とサンドボックス固定版の比較）、サプライチェーン設定（`minimumReleaseAge`。未設定は pnpm 12 既定の 24 時間を **未確認** として表示）、インストール時スクリプト（`--ignore-scripts` で未実行 → 未確認）、ネットワーク（`.npmrc` レジストリ・lockfile の tarball / git ホスト・prisma / playwright 等の取得先と egress allowlist の不一致。レジストリは fail、取得先は warn）、検証プロファイル、作業ツリーを診断。verdict ready / needs_attention / blocked をホーム画面に表示し、fail は開始を止め、warn / unverified は facts としてヒアリングへ。設定・allowlist の自動変更なし | D-38 |
+| 2 最小実装（P0） | 素案に `expectedChanges`（必須、1 件以上）と `conflictRisks`（必須、空可）を追加し task.yaml に引き継ぐ。素案プロンプトに最小変更の原則・Reviewer が実行できない受入条件の禁止を追加。Builder プロンプトに期待範囲・衝突リスク・「範囲外は最小限にし理由を Out-of-scope changes に書く」を追加。エンジンは差分直後に `scope.ts` で判定（major: 設定・検証・CI・コンテナ定義などを含む、または予想外 3 件以上 → 検証前に Builder へ 1 度差し戻し、残れば `NEEDS_HUMAN / SCOPE_DEVIATION`。minor: 記録と Reviewer への提示）。完了ゲート 7 でも major を不合格。承認画面に「変更が予想されるファイル・領域」「既存機能との衝突の可能性」、結果画面にスコープ判定を表示 | D-39 |
+| 3 Verifier / Reviewer（P1） | 変更された JSON / YAML / Markdown の決定的な構造検証（`verification/structure.ts`）を検証コマンド `structure` として追加し、完了ゲートの必須コマンドに含める（プロファイルのコマンドが失敗した場合は合格を捏造しない）。Reviewer は設計・ロジック・セキュリティ・要件整合性に集中し、実行でしか確認できない条件は requirementsUnverified に挙げて `changes_requested`（unknown は差分・作業領域を読めなかった場合に限定） | D-40 |
+
+状態機械（IMPLEMENTING → … → COMPLETED / NEEDS_HUMAN）、Docker 隔離・seccomp・egress allowlist・Policy Gate は変更なし。新しい理由コード `SCOPE_DEVIATION` と検証コマンド `structure` を追加。
+
+### テスト結果
+
+- Vitest 238 passed / 1 skipped（LIVE 用ファイル）（実 Docker 7 件含む）（新規: 事前診断 8 + 統合 4、スコープ 5、エンジンのスコープ / 構造検証 8、構造検証 4）、Playwright 29（新規 ui-16: 事前診断の表示と素案の最小実装情報）、tsc / svelte-check / cargo check / eslint クリーン、受入 PASS 56 / FAIL 0。
+- **事前診断の偽陽性・偽陰性**（`scripts/diagnosis-audit.mjs`、実プロジェクトのコピー 5 件）: fail（実行不可）0 件、warn の真陽性 2（batontime の `packageManager pnpm@9` vs サンドボックス pnpm 12、temporaid の prisma / playwright の取得先）、unverified 5/5（全件が `minimumReleaseAge` 未設定 → 「要確認」。β で実際に失敗した batontime はここに該当し、失敗しなかったサンプルも同じ表示になる＝確定できない事項を未確認として出す設計上のトレードオフ）。偽陰性（実際に失敗したのに ready と出た）0。
+- **スコープ逸脱の検出と誤検出**（`scripts/scope-replay.mjs`、過去 8 Run の差分に人手の期待範囲で再適用）: 人間の判断と 8/8 一致（major 1 = β の quality-avg-cost、none 7）。
+- **実 CLI の小規模タスク（改善後）**: 下表。初回の 2 件はモデルが `expectedChanges` を出力しなかった（埋め込み JSON スキーマに項目が無く任意扱い）ため、スキーマで必須化して 3 件を再実行した。
+
+| タスク | 改善前（β） | 改善後（v0.2.0） |
+|---|---|---|
+| 品質レポートに平均費用の行（本リポジトリ） | NEEDS_HUMAN / REVIEW_UNKNOWN、3 ラウンド、730 秒、$0.66。新モジュール 2 + テスト 1 を追加 | NEEDS_HUMAN / MAX_ROUNDS、3 ラウンド、494 秒、$0.26。素案に expectedChanges / conflictRisks、スコープ判定 minor（新モジュール 1 + テスト 1）、Reviewer は unknown ではなく一貫した指摘（「生成済み QUALITY_REPORT.md が更新されていない（AC-006）」）。費用 −61%、時間 −32%、停止理由が明確。未完了の原因は素案が再生成を要求する受入条件を含めたこと |
+| report.md の warning 表示（本リポジトリ） | COMPLETED だが人間が体裁崩れを発見（リスト記号の前に接頭辞） | COMPLETED、1 ラウンド、309 秒、$0.15。expectedChanges どおりの差分、体裁崩れなし |
+| サンプル greetLoud | — | COMPLETED、1 ラウンド、156 秒、$0.04。scope none、structure OK |
+
+累計（`docs/QUALITY_REPORT.md` 改善前後表）: 改善前 21 件 完了 57% / 実行環境起因の失敗 3 / 要確認 5 / unknown 1、改善後 5 件 完了 60% / 実行環境起因 0 / 要確認 2 / unknown 1（スキーマ修正前の 1 件）。改善後の完了タスク平均費用 $0.07（改善前 $0.09）。
+
+### 未解決事項
+
+- 受入条件が「生成物（レポート等）の更新」を要求する場合、Builder が生成コマンドを実行せず Reviewer の指摘で止まる。素案段階で該当条件を除外するか、Builder に生成コマンドの実行を促す必要がある（次期）。
+- `minimumReleaseAge` 未設定のプロジェクトは全件「要確認」になる。確定にはレジストリ照会（ネットワーク）が必要で、本フェーズでは行わない方針。
+- 別環境・外部テスターでの検証は引き続き未実施。
+
 ## 0⁸. 限定β運用フェーズの結果（2026-11-01 追記）
 
 詳細は `docs/LIMITED_BETA_REPORT.md`。コード変更なし（ドキュメントと実行記録のみ）。

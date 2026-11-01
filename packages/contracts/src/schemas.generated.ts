@@ -378,7 +378,9 @@ export const EMBEDDED_SCHEMAS: Record<string, Record<string, unknown>> = {
       "outOfScope",
       "approach",
       "acceptanceCriteria",
-      "openItems"
+      "openItems",
+      "expectedChanges",
+      "conflictRisks"
     ],
     "properties": {
       "title": {
@@ -447,6 +449,23 @@ export const EMBEDDED_SCHEMAS: Record<string, Record<string, unknown>> = {
           "type": "string",
           "minLength": 1
         }
+      },
+      "expectedChanges": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": "変更が予想されるファイル・領域（パス、ディレクトリ、glob）。Builder はこの範囲に拘束され、範囲外の重大な変更は人間の判断を求める（v0.2.0）"
+      },
+      "conflictRisks": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": "既存機能・既存実装との衝突の可能性と回避方法（v0.2.0）。無ければ空配列"
       }
     }
   },
@@ -578,6 +597,22 @@ export const EMBEDDED_SCHEMAS: Record<string, Record<string, unknown>> = {
             ]
           }
         }
+      },
+      "expectedChanges": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": "変更が予想されるファイル・領域（v0.2.0）。省略時はスコープ判定を行わない"
+      },
+      "conflictRisks": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": "既存機能との衝突の可能性（v0.2.0）"
       }
     }
   }

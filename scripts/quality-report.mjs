@@ -42,6 +42,27 @@ lines.push(`| AI 利用量（Builder の報告費用） | ${costs.length ? `$${c
 lines.push(`| egress 拒否（allowlist 外） | ${runs.reduce((s, r) => s + (r.egress?.deny ?? 0), 0)} 件 ／ 許可 ${runs.reduce((s, r) => s + (r.egress?.allow ?? 0), 0)} 件 ／ エラー ${runs.reduce((s, r) => s + (r.egress?.error ?? 0), 0)} 件 |`);
 lines.push(`| 元リポジトリ不変 | ${runs.every((r) => r.originalRepoUnchanged !== false) ? '全件' : 'NG あり'} |`);
 lines.push('');
+// 改善前後の比較（v0.2.0）: タスク名の接頭辞でフェーズ分け
+const phases = [
+  { key: 'v2.x〜β（改善前）', match: (n) => !n.startsWith('v020') },
+  { key: 'v0.2.0（改善後）', match: (n) => n.startsWith('v020') }
+];
+lines.push('', '## 改善前後（名前接頭辞 v020- で区別）', '', '| フェーズ | タスク | 完了率 | 実行環境起因の失敗 | 要確認 | 承認前停止 | 平均時間 | 平均ラウンド | Builder 費用（合計 / 完了タスク平均） | レビュー指摘ありラウンド | unknown |', '|---|---|---|---|---|---|---|---|---|---|---|');
+for (const ph of phases) {
+  const rs = runs.filter((r) => ph.match(r.name));
+  if (rs.length === 0) continue;
+  const st = rs.filter((r) => r.run);
+  const comp = rs.filter((r) => r.run?.state === 'COMPLETED');
+  const pre = rs.filter((r) => r.run?.state === 'PRECHECK_FAILED');
+  const nh = rs.filter((r) => r.run?.state === 'NEEDS_HUMAN');
+  const rounds = rs.flatMap((r) => r.rounds ?? []);
+  const rev = rounds.filter((x) => x.review);
+  const flagged = rev.filter((x) => x.review.verdict === 'changes_requested' || (x.review.findings ?? []).length > 0);
+  const unk = rev.filter((x) => x.review.verdict === 'unknown' || x.review.verdict === null);
+  const cost = rounds.map((x) => x.builderCostUsd).filter((x) => typeof x === 'number');
+  const compCost = comp.map((r) => (r.rounds ?? []).reduce((s, x) => s + (x.builderCostUsd ?? 0), 0));
+  lines.push(`| ${ph.key} | ${rs.length} | ${rs.length ? `${comp.length}/${rs.length} = ${Math.round((100 * comp.length) / rs.length)}%` : '-'} | ${pre.length} | ${nh.length} | ${rs.filter((r) => !r.run).length} | ${sec(avg(rs.map((r) => r.totalMs)))} | ${st.length ? (st.reduce((s, r) => s + (r.run?.rounds ?? 0), 0) / st.length).toFixed(2) : '-'} | $${cost.reduce((s, x) => s + x, 0).toFixed(2)} / ${compCost.length ? `$${avg(compCost).toFixed(2)}` : '-'} | ${rev.length ? `${flagged.length}/${rev.length}` : '-'} | ${unk.length} |`);
+}
 lines.push('## タスク別', '', '| タスク | 状態 | 理由 | ラウンド | 時間 | 変更ファイル | 未解決指摘 | 人間レビュー |', '|---|---|---|---|---|---|---|---|');
 for (const r of runs) {
   const hr = humanReview[r.name];

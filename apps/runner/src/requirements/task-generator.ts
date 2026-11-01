@@ -42,7 +42,9 @@ export function generateTask(input: TaskGenerationInput): TaskGenerationResult {
     acceptanceCriteria: input.proposal.acceptanceCriteria,
     verificationProfile: input.verificationProfile,
     limits: { maxImplementationAttempts: 3, maxDurationSeconds: 2700, cliTimeoutSeconds: 900, verificationTimeoutSeconds: 300 },
-    review: { blockingSeverities: ['critical', 'high'] as Array<'critical' | 'high'> }
+    review: { blockingSeverities: ['critical', 'high'] as Array<'critical' | 'high'> },
+    ...(input.proposal.expectedChanges.length > 0 ? { expectedChanges: input.proposal.expectedChanges } : {}),
+    ...(input.proposal.conflictRisks.length > 0 ? { conflictRisks: input.proposal.conflictRisks } : {})
   };
   const yaml = stringifyYaml(candidate, { lineWidth: 0 });
   // 文字列化 → 再パースしたものを検証する（保存されるものと同じ内容を検証）

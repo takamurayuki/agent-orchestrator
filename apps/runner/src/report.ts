@@ -99,6 +99,10 @@ export function renderReport(input: ReportInput): string {
     lines.push(`- 開始 ${r.startedAt} / 終了 ${r.finishedAt ?? '-'}`);
     if (r.builder) lines.push(`- Builder: exit=${r.builder.exitCode ?? 'null'} timedOut=${r.builder.timedOut} isError=${r.builder.isError} ${r.builder.durationMs}ms`);
     if (r.diff) lines.push(`- 差分: ${r.diff.files.length} ファイル${r.diff.isEmpty ? '（変更なし）' : ''}`);
+    if (r.scopeCheck && r.scopeCheck.severity !== 'none') {
+      lines.push(`- スコープ判定: ${r.scopeCheck.severity === 'major' ? '重大な逸脱' : '軽微な逸脱'} — ${maskSecrets(r.scopeCheck.detail)}`);
+      if (r.scopeCheck.builderReason) lines.push(`  - Builder の変更理由（抜粋）: ${maskSecrets(r.scopeCheck.builderReason).slice(0, 400)}`);
+    }
     if (r.policyViolations.length > 0) {
       lines.push('- ポリシー違反:');
       for (const v of r.policyViolations) lines.push(`  - ${v.code} ${v.file}: ${v.detail}`);

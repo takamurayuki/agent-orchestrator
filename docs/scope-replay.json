@@ -1,0 +1,10 @@
+[
+  { "name": "lb-self-quality-avg-cost", "expectedChanges": ["scripts/quality-report.mjs", "docs/QUALITY_REPORT.md"], "humanJudgement": "major", "note": "依頼は指標 1 行の追加。実際は新モジュール 2 ファイルとテスト 1 ファイルを追加（スコープ膨張、人間は要確認と判断）" },
+  { "name": "lb-self-report-policy-warning", "expectedChanges": ["apps/runner/src/report.ts", "apps/runner/test/unit/"], "humanJudgement": "none", "note": "report.ts と新規テストのみ。範囲内" },
+  { "name": "lb-self-sandbox-build-dir", "expectedChanges": ["apps/runner/src/sandbox/setup.ts", "apps/runner/test/unit/sandbox-setup.test.ts"], "humanJudgement": "none", "note": "指定ファイルのみ" },
+  { "name": "lb-sample-greetall", "expectedChanges": ["src/greet.ts", "test/"], "humanJudgement": "none", "note": "範囲内" },
+  { "name": "lb-sample-readme-api", "expectedChanges": ["README.md"], "humanJudgement": "none", "note": "README のみ" },
+  { "name": "beta-self-slack-token-2", "expectedChanges": ["apps/runner/src/masking.ts", "apps/runner/test/unit/"], "humanJudgement": "none", "note": "masking.ts と新規テストのみ（要確認の原因は既存実装との衝突であり、スコープではない）" },
+  { "name": "beta-sample-greet-honorific", "expectedChanges": ["src/greet.ts", "test/"], "humanJudgement": "none", "note": "範囲内" },
+  { "name": "v22-policy-loop-2", "expectedChanges": ["src/greet.ts", "test/"], "humanJudgement": "none", "note": "範囲内（停止理由は Policy Gate）" }
+]

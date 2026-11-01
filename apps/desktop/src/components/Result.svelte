@@ -166,6 +166,27 @@
           {/if}
         </section>
 
+        <!-- 2b. スコープ判定（v0.2.0） -->
+        {#if report.scopeCheck && report.scopeCheck.severity !== 'none'}
+          <section class="card" aria-labelledby="scope-heading" data-testid="scope-check" data-severity={report.scopeCheck.severity}>
+            <h2 id="scope-heading">{report.scopeCheck.severity === 'major' ? '承認した範囲外の変更（重大）' : '承認した範囲外の変更（軽微・記録のみ）'}</h2>
+            <p class="small">{report.scopeCheck.detail}</p>
+            {#if report.scopeCheck.unexpected.length > 0}
+              <ul>
+                {#each report.scopeCheck.unexpected as u (u)}
+                  <li><code>{u}</code></li>
+                {/each}
+              </ul>
+            {/if}
+            {#if report.scopeCheck.builderReason}
+              <details>
+                <summary>AI が述べた変更理由（抜粋）</summary>
+                <pre>{report.scopeCheck.builderReason}</pre>
+              </details>
+            {/if}
+          </section>
+        {/if}
+
         <!-- 3. ポリシー違反 -->
         {#if report.policyFindings.length > 0}
           <section class="card" aria-labelledby="policy-heading" data-testid="policy-findings">
