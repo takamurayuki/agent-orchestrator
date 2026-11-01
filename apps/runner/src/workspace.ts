@@ -122,8 +122,10 @@ export class WorkspaceManager {
     const env = { GIT_INDEX_FILE: indexFile };
     try {
       await this.git(workspace.path, ['read-tree', workspace.baseSha], env);
-      // .gitignore を尊重する（ビルド成果物・テスト結果など、プロジェクトが明示的に除外したファイルは変更差分にもハッシュにも含めない。D-27）
-      await this.git(workspace.path, ['add', '-A', ...this.excludePathspecs()], env);
+      // .gitignore を尊重する（ビルド成果物・テスト結果など、プロジェクトが明示的に除外したファイルは変更差分にもハッシュにも含めない。D-27）。
+      // 除外ディレクトリを pathspec で渡すと「ignore 対象だけに一致する pathspec」で git add が exit 1 になるため、全体を add してから index から外す
+      await this.git(workspace.path, ['add', '-A'], env);
+      await this.git(workspace.path, ['rm', '-r', '-q', '--cached', '--ignore-unmatch', '--', ...this.excludes], env);
       return await fn(env);
     } finally {
       rmSync(tmp, { recursive: true, force: true });

@@ -27,8 +27,9 @@ export interface CodexCredentials {
   secrets: string[];
 }
 
-export function buildCodexArgs(input: { prompt: string; schemaFile: string; outputFile: string }): string[] {
-  const args = ['codex', 'exec', '--sandbox', 'read-only', '--ephemeral', '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules', '--cd', CONTAINER_WORKSPACE, '--output-schema', input.schemaFile, '--output-last-message', input.outputFile, '--color', 'never', '--', input.prompt];
+/** argv を組み立てる。プロンプトは `-` で stdin から読ませる（argv 長制限の回避。D-28）。 */
+export function buildCodexArgs(input: { schemaFile: string; outputFile: string }): string[] {
+  const args = ['codex', 'exec', '--sandbox', 'read-only', '--ephemeral', '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules', '--cd', CONTAINER_WORKSPACE, '--output-schema', input.schemaFile, '--output-last-message', input.outputFile, '--color', 'never', '-'];
   assertNoForbiddenFlags(args);
   return args;
 }
@@ -88,6 +89,7 @@ export function parseReviewOutput(lastMessage: string): { parsed: ReviewOutcome[
 }
 
 export function toReviewOutcome(result: ProcessResult, lastMessage: string): ReviewOutcome {
+  if (result.spawnError) return { parsed: null, parseError: `codex could not be started: ${result.spawnError}`, exitCode: null, timedOut: false, durationMs: result.durationMs, rawExcerpt: excerpt(result.stderr, 2000) };
   if (result.timedOut) return { parsed: null, parseError: 'reviewer timed out', exitCode: null, timedOut: true, durationMs: result.durationMs, rawExcerpt: excerpt(lastMessage || result.stdout, 4000) };
   if (result.exitCode !== 0) return { parsed: null, parseError: `codex exited with ${result.exitCode}: ${excerpt(result.stderr, 500)}`, exitCode: result.exitCode, timedOut: false, durationMs: result.durationMs, rawExcerpt: excerpt(lastMessage || result.stdout, 4000) };
   const { parsed, parseError } = parseReviewOutput(lastMessage);
@@ -111,7 +113,8 @@ export class CodexReviewer {
     const outputFile = OUTPUT_FILE(input.round);
     const result = await this.sandbox.exec(input.runId, {
       name: `reviewer-r${input.round}`,
-      argv: buildCodexArgs({ prompt: renderReviewerPrompt(input), schemaFile: SCHEMA_FILE, outputFile }),
+      argv: buildCodexArgs({ schemaFile: SCHEMA_FILE, outputFile }),
+      stdin: renderReviewerPrompt(input),
       workspace: 'ro',
       aux: 'rw',
       // Codex の `--sandbox read-only`（bubblewrap）が user namespace を必要とする。LIVE-01 で実測: 既定 seccomp では

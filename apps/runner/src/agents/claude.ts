@@ -60,11 +60,14 @@ export interface ClaudeJsonOutput {
   structured_output?: unknown;
 }
 
-export function buildClaudeArgs(input: { prompt: string; systemPrompt: string; maxBudgetUsd: number; allowedTools: string[]; jsonSchema?: string; toolsOverride?: string }): string[] {
+/**
+ * argv を組み立てる。プロンプト本文は argv に載せず stdin で渡す（`claude -p` はプロンプト引数が無いと stdin を読む）。
+ * Windows の docker CLI 経由では argv が約 32 KB を超えると spawn に失敗する（ドッグフーディングで実測、D-28）。
+ */
+export function buildClaudeArgs(input: { systemPrompt: string; maxBudgetUsd: number; allowedTools: string[]; jsonSchema?: string; toolsOverride?: string }): string[] {
   const args = ['claude', '--print', '--output-format', 'json', '--permission-mode', 'acceptEdits', '--permission-prompts', 'none', '--allowedTools', input.allowedTools.join(','), '--setting-sources', 'user', '--disable-slash-commands', '--strict-mcp-config', '--no-session-persistence', '--max-budget-usd', String(input.maxBudgetUsd), '--append-system-prompt', input.systemPrompt];
   if (input.toolsOverride !== undefined) args.push('--tools', input.toolsOverride);
   if (input.jsonSchema !== undefined) args.push('--json-schema', input.jsonSchema);
-  args.push('--', input.prompt);
   assertNoForbiddenFlags(args);
   return args;
 }
@@ -138,8 +141,8 @@ export function toBuilderOutcome(result: ProcessResult): BuilderOutcome {
     exitCode: result.timedOut ? null : result.exitCode,
     timedOut: result.timedOut,
     durationMs: result.durationMs,
-    isError: Boolean(parsed?.is_error) || (result.exitCode !== 0 && !result.timedOut),
-    resultExcerpt: excerpt(parsed?.result ?? result.stdout ?? '', 4000),
+    isError: Boolean(parsed?.is_error) || (result.exitCode !== 0 && !result.timedOut) || result.spawnError !== null,
+    resultExcerpt: excerpt(result.spawnError ? `spawn error: ${result.spawnError}\n${result.stderr}` : (parsed?.result ?? result.stdout ?? ''), 4000),
     sessionId: typeof parsed?.session_id === 'string' ? parsed.session_id : null,
     costUsd: typeof parsed?.total_cost_usd === 'number' ? parsed.total_cost_usd : null
   };
@@ -156,10 +159,11 @@ export class ClaudeBuilder {
 
   async implement(input: BuilderInput): Promise<BuilderOutcome> {
     const creds = await this.credentials();
-    const argv = buildClaudeArgs({ prompt: renderBuilderPrompt(input), systemPrompt: BUILDER_SYSTEM_PROMPT, maxBudgetUsd: this.maxBudgetUsd, allowedTools: BUILDER_ALLOWED_TOOLS });
+    const argv = buildClaudeArgs({ systemPrompt: BUILDER_SYSTEM_PROMPT, maxBudgetUsd: this.maxBudgetUsd, allowedTools: BUILDER_ALLOWED_TOOLS });
     const result = await this.sandbox.exec(input.runId, {
       name: `builder-r${input.round}`,
       argv,
+      stdin: renderBuilderPrompt(input),
       workspace: 'rw',
       aux: 'none',
       workdir: CONTAINER_WORKSPACE,

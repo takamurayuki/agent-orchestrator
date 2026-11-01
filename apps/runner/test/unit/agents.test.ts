@@ -21,15 +21,14 @@ const builderInput = (feedback: BuilderInput['feedback'] = null): BuilderInput =
 
 describe('Claude Builder adapter', () => {
   it('builds a non-interactive argv without dangerous flags [SEC-08]', () => {
-    const args = buildClaudeArgs({ prompt: 'do it; rm -rf / && echo $(whoami)', systemPrompt: 'sys', maxBudgetUsd: 5, allowedTools: BUILDER_ALLOWED_TOOLS });
+    const args = buildClaudeArgs({ systemPrompt: 'sys', maxBudgetUsd: 5, allowedTools: BUILDER_ALLOWED_TOOLS });
     expect(args[0]).toBe('claude');
     expect(args).toContain('--print');
     expect(args).toContain('--permission-prompts');
     expect(args).not.toContain('--dangerously-skip-permissions');
     expect(findForbiddenFlags(args)).toEqual([]);
-    // prompt は 1 つの argv 要素として渡る（シェル解釈なし SEC-06）
-    expect(args[args.length - 1]).toBe('do it; rm -rf / && echo $(whoami)');
-    expect(args[args.length - 2]).toBe('--');
+    // プロンプトは argv ではなく stdin で渡す（D-28）。argv にプロンプト本文が無い
+    expect(args.join(' ')).not.toContain('do it');
     // 対象リポジトリの settings/hook を読み込まない
     expect(args.slice(args.indexOf('--setting-sources'), args.indexOf('--setting-sources') + 2)).toEqual(['--setting-sources', 'user']);
   });
@@ -69,6 +68,18 @@ describe('Claude Builder adapter', () => {
     expect(step.env.CLAUDE_CODE_OAUTH_TOKEN).toBe('tok-secret-123456');
     expect(step.secrets).toContain('tok-secret-123456');
     expect(step.argv[0]).toBe('claude');
+    // プロンプトは stdin（argv 長制限の回避 D-28）。シェル解釈なしで 1 つのストリームとして渡る
+    expect(step.stdin).toContain('TASK-TEST-001');
+    expect(step.argv.join(' ')).not.toContain('TASK-TEST-001');
+  });
+
+  it('D-28: a spawn failure (e.g. argv too long) is an error outcome, never a silent success', () => {
+    const outcome = toBuilderOutcome({ command: 'docker', args: [], exitCode: null, signal: null, stdout: '', stderr: '', truncated: false, timedOut: false, aborted: false, durationMs: 2, spawnError: 'spawn docker E2BIG' });
+    expect(outcome.isError).toBe(true);
+    expect(outcome.resultExcerpt).toContain('E2BIG');
+    const review = toReviewOutcome({ command: 'docker', args: [], exitCode: null, signal: null, stdout: '', stderr: '', truncated: false, timedOut: false, aborted: false, durationMs: 2, spawnError: 'spawn docker E2BIG' }, '');
+    expect(review.parsed).toBeNull();
+    expect(review.parseError).toContain('E2BIG');
   });
 });
 
@@ -87,10 +98,11 @@ const reviewerInput = (): ReviewerInput => ({
 
 describe('Codex Reviewer adapter', () => {
   it('uses read-only sandbox and output schema; no dangerous flags [SEC-08]', () => {
-    const args = buildCodexArgs({ prompt: 'review', schemaFile: '/tmp/s.json', outputFile: '/tmp/o.json' });
+    const args = buildCodexArgs({ schemaFile: '/tmp/s.json', outputFile: '/tmp/o.json' });
     expect(args.slice(0, 2)).toEqual(['codex', 'exec']);
     expect(args).toContain('read-only');
     expect(args).toContain('--output-schema');
+    expect(args[args.length - 1]).toBe('-'); // プロンプトは stdin
     expect(findForbiddenFlags(args)).toEqual([]);
   });
 
@@ -122,6 +134,7 @@ describe('Codex Reviewer adapter', () => {
     expect(step.workspace).toBe('ro');
     expect(step.aux).toBe('rw');
     expect(step.env.CODEX_HOME).toBe('/aux/codex-home');
+    expect(step.stdin).toContain('untracked src/new.ts');
     expect([...sandbox.files.keys()]).toContain('/aux/review/review.schema.json');
     // 出力ファイルが無い → parsed=null
     expect(outcome.parsed).toBeNull();

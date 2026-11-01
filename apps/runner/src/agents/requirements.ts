@@ -18,12 +18,13 @@ export class ClaudeInterviewModel implements InterviewModel {
 
   private async call(draftKey: string, name: string, systemPrompt: string, prompt: string, schema: Record<string, unknown>, signal: AbortSignal): Promise<ModelResult<unknown>> {
     const creds = await this.credentials();
-    const argv = buildClaudeArgs({ prompt, systemPrompt, maxBudgetUsd: this.options.maxBudgetUsd ?? 3, allowedTools: [], jsonSchema: JSON.stringify(toClaudeJsonSchema(schema)), toolsOverride: '' });
+    const argv = buildClaudeArgs({ systemPrompt, maxBudgetUsd: this.options.maxBudgetUsd ?? 3, allowedTools: [], jsonSchema: JSON.stringify(toClaudeJsonSchema(schema)), toolsOverride: '' });
     let result;
     try {
       result = await this.sandbox.exec(draftKey, {
         name,
         argv,
+        stdin: prompt,
         workspace: 'none',
         aux: 'none',
         workdir: CONTAINER_WORKSPACE,
@@ -38,6 +39,7 @@ export class ClaudeInterviewModel implements InterviewModel {
       await this.sandbox.cleanup(draftKey).catch(() => undefined);
     }
     const raw = result.stdout;
+    if (result.spawnError) return { ok: false, error: `Requirements Agent を起動できませんでした: ${result.spawnError}`, raw };
     if (result.timedOut) return { ok: false, error: 'Requirements Agent がタイムアウトしました', raw };
     if (result.exitCode !== 0) return { ok: false, error: `Requirements Agent が異常終了しました (exit ${result.exitCode ?? 'null'}): ${result.stderr.trim().slice(0, 300)}`, raw };
     const parsed = parseClaudeJson(raw);
