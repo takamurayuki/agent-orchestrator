@@ -100,5 +100,37 @@
     "agrees": true,
     "notes": "偽陽性修正後はヒアリングを通過（質問なしで承認可能）。Run は 3 ラウンドとも Codex が high を出し MAX_ROUNDS。指摘は妥当: コピー元の masking.ts に既に Slack トークンを含む汎用パターンがあり、先に適用されるため、追加したパターンでは「20 文字以上だけマスク（19 文字は非マスク）」という受入条件を満たせない。依頼と既存実装が衝突しており、人間が優先順位（既存パターンの扱い）を決める必要がある。検証は 3 回とも PASS、Policy Gate 0 件、Builder 合計 $0.21、543 秒。",
     "missed": []
+  },
+  "lb-sample-greetall": {
+    "verdict": "approved",
+    "agrees": true,
+    "notes": "greetAll は要件どおり（空配列→nobody、空白のみの名前を無視、改行連結、文字列連結）。有効な名前をトリムしない判断は要件（『空白だけの名前は無視』）に沿う。テスト 6 件。人間の指摘なし。",
+    "missed": []
+  },
+  "lb-sample-readme-api": {
+    "verdict": "approved",
+    "agrees": true,
+    "notes": "README に API セクションを追加。サンプルリポジトリの HEAD には greet だけが存在するため greet のみ記載しているのは正しい（greetAndLog 等は過去 Run の作業用コピーにしか無い）。コード変更なし。人間の指摘なし。",
+    "missed": []
+  },
+  "lb-self-sandbox-build-dir": {
+    "verdict": "approved",
+    "agrees": true,
+    "notes": "finally で親ディレクトリを非再帰 rmdir（空のときだけ削除、ENOTEMPTY/ENOENT は無視）。成功・失敗・キャンセル・他エントリあり・既に削除済みの 5 ケースを追加。既存テストは不変。実装・テストとも妥当で、本体への取り込み候補。",
+    "missed": []
+  },
+  "lb-self-report-policy-warning": {
+    "verdict": "approved_with_concern",
+    "agrees": false,
+    "notes": "warning を区別して表示する要件は満たすが、出力行が『[注意] - [warning] …』と Markdown のリスト記号の前に接頭辞を置いており、report.md のリストとして崩れる（結果画面の簡易 Markdown 表示では段落扱いになる）。『- [注意] …』が適切。Codex は approved で指摘なし。機能上は動く体裁の問題（低）。",
+    "missed": [
+      "Markdown リスト記号の前に接頭辞を置いたため report.md のリスト構造が崩れる"
+    ]
+  },
+  "lb-self-quality-avg-cost": {
+    "verdict": "needs_human",
+    "agrees": true,
+    "notes": "指標 1 行の追加依頼に対し、Builder が新モジュール（quality-metrics.mjs / .d.mts）とテストを追加してスコープが膨張。Round 1〜2 の Codex 指摘（保存 Run 記録を読まない、複数 Run の集計）は、機械回答で選んだ選択肢（先頭）と要件文の曖昧さに起因する解釈差で、Round 3 は Codex が unknown（判定不能）を返し REVIEW_UNKNOWN で停止。Builder 合計 $0.66、730 秒。人間が見ると『dogfood JSON だけを対象に 1 行追加』で足りた。依頼の粒度とヒアリング回答の影響が大きい例。",
+    "missed": []
   }
 }

@@ -1,21 +1,21 @@
 # 品質評価レポート（ドッグフーディング）
 
-生成: 2026-11-01T11:11:04.610Z 対象: 16 件（test-results/dogfood/*.json）
+生成: 2026-11-01T14:53:00.941Z 対象: 21 件（test-results/dogfood/*.json）
 
 ## 指標
 
 | 指標 | 値 |
 |---|---|
-| タスク数（Run 開始まで到達 / 全体） | 15 / 16 |
-| タスク完了率（COMPLETED / Run 開始） | 8/15 = 53% |
-| 内訳 | COMPLETED 8、NEEDS_HUMAN 4、PRECHECK_FAILED 3、INTERNAL_ERROR 0、承認前停止 1 |
-| 1 タスク当たりの実行時間（ヒアリング+Run、平均） | 246s（ヒアリング 81s、Run 184s） |
-| 平均修正ラウンド数（Run 開始分） | 1.33 |
-| Builder 1 回あたり平均時間 | 32s（20 回） |
-| Reviewer 1 回あたり平均時間 | 21s（16 回） |
-| unknown 発生率（レビュー） | 0/16 |
-| AI 利用量（Builder の報告費用） | $1.312（報告あり 20 回） |
-| egress 拒否（allowlist 外） | 128 件 ／ 許可 3198 件 ／ エラー 0 件 |
+| タスク数（Run 開始まで到達 / 全体） | 20 / 21 |
+| タスク完了率（COMPLETED / Run 開始） | 12/20 = 60% |
+| 内訳 | COMPLETED 12、NEEDS_HUMAN 5、PRECHECK_FAILED 3、INTERNAL_ERROR 0、承認前停止 1 |
+| 1 タスク当たりの実行時間（ヒアリング+Run、平均） | 265s（ヒアリング 75s、Run 207s） |
+| 平均修正ラウンド数（Run 開始分） | 1.35 |
+| Builder 1 回あたり平均時間 | 43s（27 回） |
+| Reviewer 1 回あたり平均時間 | 24s（23 回） |
+| unknown 発生率（レビュー） | 1/23 |
+| AI 利用量（Builder の報告費用） | $2.434（報告あり 27 回） |
+| egress 拒否（allowlist 外） | 184 件 ／ 許可 4314 件 ／ エラー 2 件 |
 | 元リポジトリ不変 | 全件 |
 
 ## タスク別
@@ -28,6 +28,11 @@
 | beta-sample-greet-honorific | COMPLETED | round 1: すべての完了ゲートを通過 | 1 | 172s | 2 | 0 | approved: greetFormal は要件どおり（title あり / なし、空白除去、空文字→stranger）。title が空白のみのときを未指定扱いにしたのは要件に明記がない解釈だが妥当。テストは 8 件で境界を網羅。文字列連結で実装。人間の指摘なし。 |
 | beta-self-slack-token-2 | NEEDS_HUMAN | round 3: レビュー changes_requested、修正上限に到達 | 3 | 543s | 2 | 1 | needs_human: 偽陽性修正後はヒアリングを通過（質問なしで承認可能）。Run は 3 ラウンドとも Codex が high を出し MAX_ROUNDS。指摘は妥当: コピー元の masking.ts に既に Slack トークンを含む汎用パターンがあり、先に適用されるため、追加したパターンでは「20 文字以上だけマスク（19 文字は非マスク）」という受入条件を満たせない。依頼と既存実装が衝突しており、人間が優先順位（既存パターンの扱い）を決める必要がある。検証は 3 回とも PASS、Policy Gate 0 件、Builder 合計 $0.21、543 秒。 |
 | beta-self-slack-token | SUMMARY_READY | 要件に禁止操作（EXTERNAL_POST: "slack"）が含まれています。外部サービスへの送信・投稿はツールが行いません。; 要件に禁止操作（EXTERNAL_POST: "slack"）が含まれています。外部サービスへの送信・投稿は | 0 | 46s | 0 | 0 | not_evaluated: 依頼文の「Slack のトークン」を禁止操作検出（EXTERNAL_POST）が外部投稿と誤判定し、要件に禁止操作が含まれるとして承認不可（SUMMARY_READY で停止、GUI から回避不能）。偽陽性。検出をサービス名単独ではなく送信・投稿・通知の語との共起に変更し回帰テストを追加（β修正）。修正後に再実行（beta-self-slack-token-2）。 |
+| lb-sample-greetall | COMPLETED | round 1: すべての完了ゲートを通過 | 1 | 161s | 2 | 0 | approved: greetAll は要件どおり（空配列→nobody、空白のみの名前を無視、改行連結、文字列連結）。有効な名前をトリムしない判断は要件（『空白だけの名前は無視』）に沿う。テスト 6 件。人間の指摘なし。 |
+| lb-sample-readme-api | COMPLETED | round 1: すべての完了ゲートを通過 | 1 | 137s | 1 | 0 | approved: README に API セクションを追加。サンプルリポジトリの HEAD には greet だけが存在するため greet のみ記載しているのは正しい（greetAndLog 等は過去 Run の作業用コピーにしか無い）。コード変更なし。人間の指摘なし。 |
+| lb-self-quality-avg-cost | NEEDS_HUMAN | round 3: Reviewer verdict=unknown | 3 | 730s | 5 | 0 | needs_human: 指標 1 行の追加依頼に対し、Builder が新モジュール（quality-metrics.mjs / .d.mts）とテストを追加してスコープが膨張。Round 1〜2 の Codex 指摘（保存 Run 記録を読まない、複数 Run の集計）は、機械回答で選んだ選択肢（先頭）と要件文の曖昧さに起因する解釈差で、Round 3 は Codex が unknown（判定不能）を返し REVIEW_UNKNOWN で停止。Builder 合計 $0.66、730 秒。人間が見ると『dogfood JSON だけを対象に 1 行追加』で足りた。依頼の粒度とヒアリング回答の影響が大きい例。 |
+| lb-self-report-policy-warning | COMPLETED | round 1: すべての完了ゲートを通過 | 1 | 282s | 2 | 0 | approved_with_concern: warning を区別して表示する要件は満たすが、出力行が『[注意] - [warning] …』と Markdown のリスト記号の前に接頭辞を置いており、report.md のリストとして崩れる（結果画面の簡易 Markdown 表示では段落扱いになる）。『- [注意] …』が適切。Codex は approved で指摘なし。機能上は動く体裁の問題（低）。 |
+| lb-self-sandbox-build-dir | COMPLETED | round 1: すべての完了ゲートを通過 | 1 | 321s | 2 | 0 | approved: finally で親ディレクトリを非再帰 rmdir（空のときだけ削除、ENOTEMPTY/ENOENT は無視）。成功・失敗・キャンセル・他エントリあり・既に削除済みの 5 ケースを追加。既存テストは不変。実装・テストとも妥当で、本体への取り込み候補。 |
 | phase2-review-converge | COMPLETED | round 2: すべての完了ゲートを通過 | 2 | 344s | 2 | 0 | approved: safeJoin は空文字・NUL・バックスラッシュ・絶対パス・%・'..' セグメントを拒否し、posix.resolve で正規化して baseDir 直下以外を拒否。Round 1 の Codex 指摘（baseDir が '/' のとき結果 === baseDir を拒否できない）は妥当で、Round 2 で `result === base` 条件とテストが追加され approved。人間の所見: '%' を含む正当なファイル名も拒否する過剰拒否（安全側）、symlink は扱わない旨がコメントに明記されており妥当。 |
 | phase2-verify-fail-conflict | COMPLETED | round 2: すべての完了ゲートを通過 | 2 | 290s | 2 | 0 | approved_with_concern: makeBanner の機能は正しい。Round 1 は lint（テンプレートリテラル禁止）で検証失敗、Round 2 で修正し approved。ただし修正方法は規約に合わせる書き換えではなく `eslint-disable-next-line` による規則の局所無効化（依頼が『必ずテンプレートリテラルで』と規約と矛盾していたため）。人間としては依頼の矛盾を質問段階で指摘すべきで、Codex もこの点を指摘していない。 |
 | phase2-verify-fail-loop | COMPLETED | round 1: すべての完了ゲートを通過 | 1 | 170s | 2 | 0 | approved: formatList は仕様どおり。厳格 lint（テンプレートリテラル禁止・no-console）を Builder が事前に読み取り文字列連結で実装したため検証失敗ループは発生せず。"a (1 items)" の単数形は依頼どおり（仕様上の瑕疵ではない）。 |
@@ -47,6 +52,11 @@
 - **beta-sample-greet-honorific**: AI=approved / 人間=approved（一致）。greetFormal は要件どおり（title あり / なし、空白除去、空文字→stranger）。title が空白のみのときを未指定扱いにしたのは要件に明記がない解釈だが妥当。テストは 8 件で境界を網羅。文字列連結で実装。人間の指摘なし。
 - **beta-self-slack-token-2**: AI=changes_requested/needs_human / 人間=needs_human（一致）。偽陽性修正後はヒアリングを通過（質問なしで承認可能）。Run は 3 ラウンドとも Codex が high を出し MAX_ROUNDS。指摘は妥当: コピー元の masking.ts に既に Slack トークンを含む汎用パターンがあり、先に適用されるため、追加したパターンでは「20 文字以上だけマスク（19 文字は非マスク）」という受入条件を満たせない。依頼と既存実装が衝突しており、人間が優先順位（既存パターンの扱い）を決める必要がある。検証は 3 回とも PASS、Policy Gate 0 件、Builder 合計 $0.21、543 秒。
 - **beta-self-slack-token**: AI=n/a / 人間=not_evaluated（不一致）。依頼文の「Slack のトークン」を禁止操作検出（EXTERNAL_POST）が外部投稿と誤判定し、要件に禁止操作が含まれるとして承認不可（SUMMARY_READY で停止、GUI から回避不能）。偽陽性。検出をサービス名単独ではなく送信・投稿・通知の語との共起に変更し回帰テストを追加（β修正）。修正後に再実行（beta-self-slack-token-2）。 未検出: 禁止操作検出の偽陽性（サービス名のみで EXTERNAL_POST）
+- **lb-sample-greetall**: AI=approved / 人間=approved（一致）。greetAll は要件どおり（空配列→nobody、空白のみの名前を無視、改行連結、文字列連結）。有効な名前をトリムしない判断は要件（『空白だけの名前は無視』）に沿う。テスト 6 件。人間の指摘なし。
+- **lb-sample-readme-api**: AI=approved / 人間=approved（一致）。README に API セクションを追加。サンプルリポジトリの HEAD には greet だけが存在するため greet のみ記載しているのは正しい（greetAndLog 等は過去 Run の作業用コピーにしか無い）。コード変更なし。人間の指摘なし。
+- **lb-self-quality-avg-cost**: AI=changes_requested/needs_human / 人間=needs_human（一致）。指標 1 行の追加依頼に対し、Builder が新モジュール（quality-metrics.mjs / .d.mts）とテストを追加してスコープが膨張。Round 1〜2 の Codex 指摘（保存 Run 記録を読まない、複数 Run の集計）は、機械回答で選んだ選択肢（先頭）と要件文の曖昧さに起因する解釈差で、Round 3 は Codex が unknown（判定不能）を返し REVIEW_UNKNOWN で停止。Builder 合計 $0.66、730 秒。人間が見ると『dogfood JSON だけを対象に 1 行追加』で足りた。依頼の粒度とヒアリング回答の影響が大きい例。
+- **lb-self-report-policy-warning**: AI=approved / 人間=approved_with_concern（不一致）。warning を区別して表示する要件は満たすが、出力行が『[注意] - [warning] …』と Markdown のリスト記号の前に接頭辞を置いており、report.md のリストとして崩れる（結果画面の簡易 Markdown 表示では段落扱いになる）。『- [注意] …』が適切。Codex は approved で指摘なし。機能上は動く体裁の問題（低）。 未検出: Markdown リスト記号の前に接頭辞を置いたため report.md のリスト構造が崩れる
+- **lb-self-sandbox-build-dir**: AI=approved / 人間=approved（一致）。finally で親ディレクトリを非再帰 rmdir（空のときだけ削除、ENOTEMPTY/ENOENT は無視）。成功・失敗・キャンセル・他エントリあり・既に削除済みの 5 ケースを追加。既存テストは不変。実装・テストとも妥当で、本体への取り込み候補。
 - **phase2-review-converge**: AI=approved / 人間=approved（一致）。safeJoin は空文字・NUL・バックスラッシュ・絶対パス・%・'..' セグメントを拒否し、posix.resolve で正規化して baseDir 直下以外を拒否。Round 1 の Codex 指摘（baseDir が '/' のとき結果 === baseDir を拒否できない）は妥当で、Round 2 で `result === base` 条件とテストが追加され approved。人間の所見: '%' を含む正当なファイル名も拒否する過剰拒否（安全側）、symlink は扱わない旨がコメントに明記されており妥当。
 - **phase2-verify-fail-conflict**: AI=approved / 人間=approved_with_concern（不一致）。makeBanner の機能は正しい。Round 1 は lint（テンプレートリテラル禁止）で検証失敗、Round 2 で修正し approved。ただし修正方法は規約に合わせる書き換えではなく `eslint-disable-next-line` による規則の局所無効化（依頼が『必ずテンプレートリテラルで』と規約と矛盾していたため）。人間としては依頼の矛盾を質問段階で指摘すべきで、Codex もこの点を指摘していない。 未検出: 依頼とプロジェクト規約の矛盾を lint 無効化で回避した点（Reviewer 未検出）
 - **phase2-verify-fail-loop**: AI=approved / 人間=approved（一致）。formatList は仕様どおり。厳格 lint（テンプレートリテラル禁止・no-console）を Builder が事前に読み取り文字列連結で実装したため検証失敗ループは発生せず。"a (1 items)" の単数形は依頼どおり（仕様上の瑕疵ではない）。
