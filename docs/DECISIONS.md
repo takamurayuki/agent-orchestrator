@@ -157,7 +157,20 @@ SPEC.md を唯一の要件ベースラインとし、契約の曖昧さ・不整
 - **理由:** ドッグフーディング（自己リポジトリ）で、Builder がテストを実行して `test-results/vitest.json`（gitignore 対象）を書き、その後の検証ステップが同ファイルを更新したため、検証前の状態から取った「レビュー前ハッシュ」と、レビュー後に同期した状態のハッシュが不一致になり `WORKSPACE_MODIFIED_DURING_REVIEW` と誤判定した。Reviewer は書いていない。ハッシュ照合は「レビュー中に変更が無いこと」の検証なので、両ハッシュは同じ同期状態を基準にしなければならない。また .gitignore で除外されたファイルはプロジェクトが成果物と宣言したものではなく、差分に含めると Reviewer にノイズを与える。
 - **影響・対処:** Run あたり pull が 1 回増える（数秒）。未追跡だが ignore されていないファイルは従来どおり差分・ハッシュに含む（EX-11）。回帰テスト `engine.test.ts`（pull 3 回の順序）、`workspace.test.ts`（ignore 対象が差分・ハッシュに影響しない）。
 
+## D-28 AI へのプロンプトは argv ではなく stdin で渡す
+
+- **決定:** Builder（`claude -p`：プロンプト引数なしで stdin を読む）、Requirements Agent（同）、Reviewer（`codex exec -`）のプロンプト本文を `SandboxStep.stdin` で渡し、`docker run -i` 経由でコンテナに流す。argv にはフラグとシステムプロンプトだけを載せる。spawn 失敗（`spawnError`）は Builder では `isError`、Reviewer では `parseError` として明示する。
+- **理由:** ドッグフーディング（自己リポジトリ）で、差分に大きな JSON が含まれたレビュー用プロンプトを argv に載せたところ、Windows の `docker` クライアント起動時に argv 長制限（約 32 KB）で spawn が失敗し、2 ms で `exitCode=null` の結果が返ってレビューが「不正 JSON」扱いになった。失敗の原因が結果に現れず診断に時間がかかった。
+- **影響・対処:** プロンプト長の上限が実質なくなる（Codex 側のコンテキスト上限は別）。回帰テスト `agents.test.ts`（argv にプロンプト本文が無い、stdin に含まれる、spawn 失敗はエラー）。
+
 ## 残課題（未実装 / 未実測）
+
+- コード署名（署名鍵が無いため未実施。NSIS インストーラは作成・実測済み）。
+- `HTTP_PROXY` を無視するツール（Prisma のエンジン取得など）は allowlist に入れても到達不可。透過プロキシが必要。
+- 依頼とプロジェクト規約の矛盾（lint 規則など）をヒアリング段階で検出しない。Builder の `eslint-disable` 追加を差分ポリシーが警告しない。
+- egress プロキシは TLS を終端しないため、許可ホストに対する通信内容の検査はしない。
+- pnpm 以外のパッケージマネージャ用プロファイルは未提供（`node-pnpm` のみ）。
+- モノレポの並列 typecheck がメモリ上限で SIGKILL され得る（運用者がメモリ上限を上げるか並列度を落とす）。
 
 - コード署名（署名鍵が無いため未実施。NSIS インストーラは作成・実測済み）。
 - egress プロキシは TLS を終端しないため、許可ホストに対する通信内容の検査はしない。

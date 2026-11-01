@@ -1,8 +1,8 @@
 # 受入テスト結果
 
-生成: 2026-11-01T05:30:42.688Z
+生成: 2026-11-01T06:37:57.050Z
 
-- Vitest: 157/158 passed
+- Vitest: 162/163 passed
 - Playwright: 13/13 passed
 - 集計: PASS 56 / FAIL 0 / NOT_RUN 0
 
@@ -52,7 +52,7 @@ PASS = 対応する自動テストがすべて成功。FAIL = 1 件以上失敗�
 | SEC-02 | Security | network egress制限不可 | PRECHECK_FAILED | **PASS** | 3 |
 | SEC-03 | Security | Reviewer書込試行 | OSレベルで拒否 | **PASS** | 4 |
 | SEC-04 | Security | worktree外へ書込 | 拒否 | **PASS** | 2 |
-| SEC-05 | Security | 認証情報がstdoutに現れる | マスキング | **PASS** | 11 |
+| SEC-05 | Security | 認証情報がstdoutに現れる | マスキング | **PASS** | 12 |
 | SEC-06 | Security | shell metacharacterをタスクに含む | shell実行しない | **PASS** | 6 |
 | SEC-07 | Security | 任意コマンドのYAML注入 | schema拒否 | **PASS** | 13 |
 | SEC-08 | Security | 危険な権限フラグ入力 | 拒否 | **PASS** | 3 |
@@ -329,6 +329,7 @@ PASS = 対応する自動テストがすべて成功。FAIL = 1 件以上失敗�
 - ✓ process runner (SEC-06 / SEC-05 / EX-12) > aborts via AbortSignal
 - ✓ process runner (SEC-06 / SEC-05 / EX-12) > masks secrets and truncates oversized output
 - ✓ process runner (SEC-06 / SEC-05 / EX-12) > does not leak the parent environment unless inheritEnv is set
+- ✓ credential hygiene across all run artifacts [SEC-05] > a token that leaks into builder output, review text and egress er
 - ✓ Claude Builder adapter > runs inside the sandbox with rw workspace, egress network and injected credentials masked [SEC-
 - ✓ masking [SEC-05] > masks known key formats and env assignments
 - ✓ masking [SEC-05] > masks explicitly provided secrets and JSON tokens

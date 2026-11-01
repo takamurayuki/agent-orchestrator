@@ -2,6 +2,69 @@
 
 作成日: 2026-11-01（リリース準備フェーズ後に更新）　対象: `docs/SPEC.md` v2.0　受入結果: `docs/ACCEPTANCE_REPORT.md`（**PASS 56 / FAIL 0 / NOT_RUN 0**）
 
+## 0′. ドッグフーディング・品質検証フェーズの結果（2026-11-01 追記）
+
+詳細指標は `docs/QUALITY_REPORT.md`（`scripts/quality-report.mjs` が `test-results/dogfood/*.json` と `docs/dogfood-review.json` から生成）。
+
+### Phase 1 実プロジェクトでの試験利用（3 件、コピー上で実行）
+
+| タスク | 対象 | 結果 | ラウンド | 時間 | 人間レビュー / AI 判定 |
+|---|---|---|---|---|---|
+| T1 `formatRemaining(ms)`（mm:ss 整形 + テスト） | batontime（React/Firebase スキャフォールド、21 ファイル） | COMPLETED | 1 | 144 s | approved / approved（一致） |
+| T2 `maskSecrets` に Google / Stripe キーのパターン追加 + テスト | agent-orchestrator 自身（156 ファイル） | NEEDS_HUMAN / MAX_ROUNDS | 3 | 562 s | needs_human / changes_requested（一致）。Codex の 3 指摘は妥当（新ラベル置換と既存の全体マスクの優先順位が依頼内で矛盾） |
+| T3 `clamp()` を packages/core に追加 | temporaid（pnpm モノレポ、149 ファイル、Prisma） | PRECHECK_FAILED（ベースライン検証） | 0 | 195 s | not_evaluated（AI 未呼出。`prisma generate` が HTTP_PROXY を無視して `binaries.prisma.sh` へ直接接続し DNS 不可、`apps/web` typecheck が SIGKILL） |
+
+実プロジェクトで最初に当たったのは AI ではなく「検証環境」の問題で、以下を**製品側の不具合として修正**した（いずれも回帰テスト付き、D-23〜D-28）:
+
+1. ロックファイル未コミット / `packageManager: pnpm@9.12.0` による版切替失敗 / pnpm 12 の supply-chain policy による lockfile 拒否 → pnpm の版切替を無効化、運用者設定 `AGENT_ORCHESTRATOR_PNPM_MIN_RELEASE_AGE`（D-24, D-26）
+2. Git for Windows の `core.autocrlf`（システム設定）を無視して `git status` していたため、クリーンなリポジトリが「未コミット変更あり」で preflight 失敗 → 利用者設定で判定（D-25）
+3. **ベースライン検証**（Builder 前に未変更リポジトリで検証プロファイルを実行）を追加し、環境起因の失敗を AI 費用ゼロで `PRECHECK_FAILED` にする（D-23）。T2 では、私自身が失敗テストを含むコミットを作った際にベースラインが検出した
+4. ネストした `functions/node_modules` の symlink で pull の tar が失敗 → 除外パターンを全階層に（docker-sandbox 回帰テスト）
+5. Builder が書いた `test-results/vitest.json`（gitignore 対象）を検証ステップが更新し、レビュー前後ハッシュが不一致 → レビュー前に再同期、`.gitignore` 対象を差分・ハッシュから除外（D-27）
+6. 自己リポジトリの差分（大きな JSON を含む）をプロンプトとして argv に載せたため Windows の argv 長制限で `docker run` の spawn が失敗し、レビューが即 null → **プロンプトは stdin で渡す**、spawn 失敗を明示的なエラーに（D-28）
+7. `round.json` / `status.json` が未マスクで保存され得た → 保存前にマスキング。全成果物を走査する認証情報ハイジーンテストを追加
+8. 自分自身の `typecheck` / `test:run` が contracts のビルド済み dist を前提にしていてクリーンクローンで失敗 → スクリプトを自己完結に。`describe.skip` の LIVE テストが収集時にネットワークを使っていた → `beforeAll` へ
+
+### Phase 2 未観測ループの検証（実 CLI、強制なし）
+
+| ケース | 観測 | シナリオ |
+|---|---|---|
+| Codex `changes_requested` → Claude Code 修正 → `approved` | **観測** | `safeJoin`（パストラバーサル判定）: Round 1 high「baseDir が `/` のとき結果 === baseDir を拒否できない」→ Round 2 で条件とテストを追加 → approved → COMPLETED（2 ラウンド、344 s） |
+| 自動検証失敗 → Claude Code 修正 → 検証成功 | **観測** | 厳格 lint（テンプレートリテラル禁止）のサンプルで、依頼が「必ずテンプレートリテラルで」と規約に矛盾 → Round 1 lint exit 1 → Round 2 修正 → 検証 PASS → approved → COMPLETED（2 ラウンド、290 s）。ただし修正は `eslint-disable-next-line` による規則の局所無効化で、Codex はこれを指摘しなかった（人間レビューは approved_with_concern、唯一の不一致） |
+| （参考）同じ厳格 lint で矛盾の無い依頼 | 1 ラウンドで完了 | Builder が lint 設定を読み取り、文字列連結で実装（検証失敗ループは発生せず） |
+
+### Phase 3 安全性と可観測性
+
+- **seccomp の残余リスク整理と引数制限:** Reviewer コンテナのプロファイルは Docker 既定 + 5 syscall。さらに `clone` は **CLONE_NEWUSER を含む呼び出しのみ**追加許可、`unshare` は **namespace フラグ以外のビットが無い呼び出しのみ**に絞った（`SCMP_CMP_MASKED_EQ`。bwrap が動くことを変種ごとに実測）。`mount` / `umount2` / `pivot_root` はポインタ引数のため絞れない。残余リスク: 非特権 user namespace 内の mount 系 syscall によるカーネル攻撃面（capability は全て落下、書込先は :ro ワークスペース・/aux・tmpfs のみ）。D-22 に更新。
+- **egress ログの UI 表示:** Run ごとに `runs/<runId>/egress.jsonl` を保存し、結果画面の「ネットワーク（egress プロキシ）」で **許可（AI / レジストリ通信）／ 拒否（allowlist 外、ホスト別件数）／ 接続エラー** を区別して表示。ログはホスト名とポートのみ（URL パス・ヘッダー・認証情報なし）。Playwright UI-08 で表示を検証。ドッグフーディングでは Codex が `*.oaiusercontent.com` / `ab.chatgpt.com` へ接続を試み、拒否されていることが可視化された（計 64 件拒否、機能影響なし）。
+- **認証情報のログ混入テスト:** Builder 出力・レビュー要約・egress エラー文にトークンを混入させ、`runs/<runId>` 配下の全ファイルと SQLite のイベントに残らないことを検証（この過程で round.json / status.json の未マスクを発見・修正）。
+
+### Phase 4 品質指標（ドッグフーディング 6 Run）
+
+| 指標 | 値 |
+|---|---|
+| タスク完了率（COMPLETED / Run 開始） | 4 / 6 = 67%（NEEDS_HUMAN 1、PRECHECK_FAILED 1） |
+| 1 タスク当たりの実行時間（平均） | 284 s（ヒアリング 67 s、Run 217 s） |
+| 平均修正ラウンド数 | 1.50（Builder 9 回、Reviewer 8 回） |
+| Builder / Reviewer 1 回あたり平均時間 | 33 s / 21 s |
+| unknown 発生率（レビュー） | 0 / 8（JSON 不正・unknown なし） |
+| 人間が発見した未検出の問題 | 1 件（lint 規則の局所無効化を Reviewer が指摘せず） |
+| 人間レビューと AI 判定の一致 | 5 / 6（不一致 1 件は上記） |
+| AI 利用量 | Builder 報告費用 合計 $0.683（9 回、1 回 $0.05〜0.11）。Codex はサブスクリプション消費（費用 API なし）。ヒアリング（Requirements Agent）は費用未報告 |
+| egress | 許可 1,191 / 拒否 64 / エラー 0 |
+| 元リポジトリの不変 | 全件 |
+
+回帰: Vitest 162、Playwright 13、tsc / svelte-check / cargo check / eslint クリーン、受入テスト PASS 56 / FAIL 0 / NOT_RUN 0。
+
+### 改善候補（優先順位付き）
+
+1. **（高）依頼とプロジェクト規約の矛盾をヒアリング段階で検出する** — 検証設定（lint ルール等）と依頼文の衝突を Requirements Agent の facts に含め、blocking 質問にする。あわせて差分ポリシーに `eslint-disable` / `@ts-ignore` / `skip` 系コメントの**新規追加**を警告として検出し、Reviewer プロンプトにも明示する（今回の唯一の未検出）。
+2. **（高）プロキシ非対応ツールへの対応** — `prisma generate` 等 `HTTP_PROXY` を無視するツールは allowlist に入れても到達できない。透過プロキシ（iptables REDIRECT）または egress ゲートウェイ方式の検討。それまでは README に「対象外のプロジェクト種別」として明記。
+3. **（中）ベースライン検証の結果キャッシュ** — 同じ baseSha で成功したベースラインを再利用し、Run ごとの install / typecheck（1〜4 分）を省く。
+4. **（中）Requirements Agent の費用・トークンの記録** — Claude JSON の `total_cost_usd` / usage を Draft にも保存し、品質レポートに含める。
+5. **（中）モノレポの並列 typecheck と資源上限** — `pnpm -r` の並列実行でメモリ 4g を超えて SIGKILL。並列度の抑制（`--workspace-concurrency 1`）か上限の自動調整。
+6. **（低）egress ログの許可先別件数・時系列表示**、Codex の `oaiusercontent.com` 到達試行の背景調査（添付ファイル取得と推定）。
+
 ## 0. リリース準備フェーズの結果
 
 ### Phase 1 ベースライン確定
