@@ -8,7 +8,7 @@ import { openDatabase } from '../../src/storage/db.js';
 import { FileAndDbRecorder } from '../../src/storage/recorder.js';
 import { Repository } from '../../src/storage/repository.js';
 import { FakeSandbox } from '../helpers/fake-sandbox.js';
-import { createMockDeps, highReview, okBuilder, reviewOutcome, sampleTask, type MockOptions } from '../helpers/mock-deps.js';
+import { approvedReview, createMockDeps, highReview, okBuilder, reviewOutcome, sampleTask, type MockOptions } from '../helpers/mock-deps.js';
 import { stringify } from 'yaml';
 
 let dir: string;
@@ -154,5 +154,33 @@ describe('RunService', () => {
     expect(report.openFindings[0]?.id).toBe('REV-001');
     expect(report.run.nextActions.length).toBeGreaterThan(0);
     expect(repo.listFindings(final!.runId).length).toBe(3);
+  });
+});
+
+describe('credential hygiene across all run artifacts [SEC-05]', () => {
+  it('a token that leaks into builder output, review text and egress errors never reaches any file under runs/<runId>', async () => {
+    const approved = approveTask();
+    const secret = 'sk-ant-api03-LEAKEDTOKENabcdefghijklmnopqrstuvwxyz0123';
+    const { service, sandbox } = build({
+      builders: [
+        async (input) => {
+          input.onLog(`Authorization: Bearer ${secret}\n`);
+          return { ...okBuilder(), resultExcerpt: `done, used ANTHROPIC_API_KEY=${secret}` };
+        }
+      ],
+      reviews: [reviewOutcome({ ...approvedReview(), summary: `ok (saw ${secret})` })]
+    });
+    sandbox.egressLines = [JSON.stringify({ ts: 't', action: 'error', method: 'CONNECT', host: 'api.anthropic.com', error: `reset ${secret}` })];
+    await service.start(approved.id);
+    const final = await service.waitForActive();
+    expect(final?.state).toBe('COMPLETED');
+    const { readdirSync, statSync } = await import('node:fs');
+    const walk = (p: string): string[] => (statSync(p).isDirectory() ? readdirSync(p).flatMap((c) => walk(join(p, c))) : [p]);
+    const files = walk(final!.runDir);
+    expect(files.length).toBeGreaterThan(5);
+    for (const f of files) expect(readFileSync(f, 'utf8'), f).not.toContain(secret);
+    // SQLite に保存されたイベント・レビュー要約にも含まれない
+    const events = repo.listEvents(final!.runId);
+    expect(JSON.stringify(events)).not.toContain(secret);
   });
 });

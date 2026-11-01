@@ -122,7 +122,8 @@ export class WorkspaceManager {
     const env = { GIT_INDEX_FILE: indexFile };
     try {
       await this.git(workspace.path, ['read-tree', workspace.baseSha], env);
-      await this.git(workspace.path, ['add', '-A', '--force', ...this.excludePathspecs()], env);
+      // .gitignore を尊重する（ビルド成果物・テスト結果など、プロジェクトが明示的に除外したファイルは変更差分にもハッシュにも含めない。D-27）
+      await this.git(workspace.path, ['add', '-A', ...this.excludePathspecs()], env);
       return await fn(env);
     } finally {
       rmSync(tmp, { recursive: true, force: true });

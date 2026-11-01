@@ -1,0 +1,26 @@
+{
+  "batontime-format-remaining": {
+    "verdict": "approved",
+    "agrees": true,
+    "notes": "formatRemaining は要件どおり（負値/NaN/±Infinity→00:00、秒は切り捨て、分は 2 桁超可）。テストは境界値（999/1000/59999/60000/125:07）を網羅し、既存の src/*.test.ts 配置規約に従う。人間の指摘なし。",
+    "missed": []
+  },
+  "temporaid-core-clamp": {
+    "verdict": "not_evaluated",
+    "agrees": true,
+    "notes": "ベースライン検証で PRECHECK_FAILED（prisma generate が binaries.prisma.sh へプロキシ非対応の直接接続を行い DNS 解決不可、apps/web の typecheck が SIGKILL）。AI は呼ばれず差分なし。環境側の制限として妥当な fail-closed。",
+    "missed": []
+  },
+  "self-masking-patterns": {
+    "verdict": "pending",
+    "agrees": true,
+    "notes": "実行待ち",
+    "missed": []
+  },
+  "phase2-verify-fail-loop": {
+    "verdict": "approved",
+    "agrees": true,
+    "notes": "formatList は仕様どおり。厳格 lint（テンプレートリテラル禁止・no-console）を Builder が事前に読み取り文字列連結で実装したため検証失敗ループは発生せず。\"a (1 items)\" の単数形は依頼どおり（仕様上の瑕疵ではない）。",
+    "missed": []
+  }
+}

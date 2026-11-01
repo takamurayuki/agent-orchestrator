@@ -31,6 +31,11 @@ describe('RunEngine state machine (SPEC §6)', () => {
     expect(transitions).toEqual(['PREFLIGHT', 'IMPLEMENTING', 'VERIFYING', 'REVIEWING', 'COMPLETED']);
     expect(mock.calls.baseline).toBe(1);
     expect(types).toContain('verify.baseline.finished');
+    // D-27: push 1 回、pull は Builder 後 / 検証後 / レビュー後の 3 回（レビュー前ハッシュは検証後の状態から取る）
+    expect(mock.calls.push).toBe(1);
+    expect(mock.calls.pull).toBe(3);
+    const synced = mock.recorder.events.filter((e) => e.type === 'workspace.synced').map((e) => `${e.payload.direction}:${e.payload.after ?? ''}`);
+    expect(synced).toEqual(['push:', 'pull:builder', 'pull:verification', 'pull:review'].slice(0, synced.length));
   });
 
   it('D-23: baseline verification failure (repo broken before any change) → PRECHECK_FAILED without calling the Builder', async () => {

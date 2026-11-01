@@ -82,6 +82,16 @@ describe('WorkspaceManager (git)', () => {
     const hashAfter = await wm.hash(ws);
     expect(hashAfter).not.toBe(hashBefore);
     expect(await wm.hash(ws)).toBe(hashAfter);
+
+    // D-27: .gitignore で除外されたファイル（検証成果物など）は差分にもハッシュにも含めない
+    writeFileSync(join(ws.path, '.gitignore'), 'node_modules/\ntest-results/\n');
+    mkdirSync(join(ws.path, 'test-results'));
+    writeFileSync(join(ws.path, 'test-results', 'vitest.json'), '{"run":1}');
+    const withIgnored = await wm.captureDiff(ws);
+    expect(withIgnored.summary.files.some((f) => f.path.startsWith('test-results/'))).toBe(false);
+    const h1 = await wm.hash(ws);
+    writeFileSync(join(ws.path, 'test-results', 'vitest.json'), '{"run":2}');
+    expect(await wm.hash(ws)).toBe(h1);
   });
 
   it('splitPatchByFile splits a multi-file patch', () => {

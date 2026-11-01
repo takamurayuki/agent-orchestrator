@@ -44,8 +44,9 @@ export class FileAndDbRecorder implements RunRecorder {
   }
 
   async updateStatus(status: RunStatus): Promise<void> {
-    this.repo.updateRun(status);
-    writeFileSync(join(this.runDir(status.runId), 'status.json'), JSON.stringify(status, null, 2), 'utf8');
+    const masked = JSON.parse(maskSecrets(JSON.stringify(status))) as RunStatus;
+    this.repo.updateRun(masked);
+    writeFileSync(join(this.runDir(status.runId), 'status.json'), JSON.stringify(masked, null, 2), 'utf8');
   }
 
   async appendEvent(event: Omit<RunEvent, 'sequence' | 'timestamp'>): Promise<RunEvent> {
@@ -63,10 +64,12 @@ export class FileAndDbRecorder implements RunRecorder {
   }
 
   async saveRound(runId: string, round: RoundRecord): Promise<void> {
-    this.repo.saveRound(runId, round);
+    // Builder の出力抜粋・レビュー要約・検証ログ抜粋に認証情報が混ざり得るので、SQLite とファイルの両方でマスキングする
+    const masked = JSON.parse(maskSecrets(JSON.stringify(round))) as RoundRecord;
+    this.repo.saveRound(runId, masked);
     const dir = join(this.runDir(runId), 'rounds', String(round.round));
     mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, 'round.json'), JSON.stringify(round, null, 2), 'utf8');
+    writeFileSync(join(dir, 'round.json'), JSON.stringify(masked, null, 2), 'utf8');
   }
 
   async saveArtifact(runId: string, round: number, name: string, content: string): Promise<void> {

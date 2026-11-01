@@ -411,6 +411,10 @@ export class RunEngine {
         // ---- REVIEWING ----
         if (!withinTime()) return await finish('NEEDS_HUMAN', 'TIMEOUT', `maxDurationSeconds(${task.limits.maxDurationSeconds}) を超過`);
         await transition('REVIEWING');
+        // 検証（install / test）はワークスペースにファイルを書き得る（node_modules 以外にもテスト結果等）。レビュー前のハッシュは
+        // 検証後の状態から取るため、ここで再同期する（ドッグフーディングで検証成果物による偽の「レビュー中の変更」を実測。D-27）
+        await this.deps.transport.pull(runId, workspace);
+        await emit('workspace.synced', { direction: 'pull', after: 'verification' }, round);
         record.workspaceHashBeforeReview = await this.deps.workspace.hash(workspace);
         await emit('review.started', { round, workspaceHash: record.workspaceHashBeforeReview }, round);
         const reviewLog: string[] = [];
