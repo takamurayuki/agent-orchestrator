@@ -92,7 +92,7 @@ Rust 側が `node apps/runner/dist/main.js --ipc stdio` をサイドカーとし
 | 変数 | 既定 | 用途 |
 |---|---|---|
 | `AGENT_ORCHESTRATOR_APP_DATA` | `~/.agent-orchestrator/app-data` | SQLite・tasks・runs・ワークスペースの保存先 |
-| `AGENT_ORCHESTRATOR_EGRESS_ALLOWLIST` | `api.anthropic.com,api.openai.com,chatgpt.com,auth.openai.com,registry.npmjs.org` | コンテナから到達できるホスト。例: Prisma を使うプロジェクトでは `binaries.prisma.sh` を追加 |
+| `AGENT_ORCHESTRATOR_EGRESS_ALLOWLIST` | `api.anthropic.com,api.openai.com,chatgpt.com,auth.openai.com,registry.npmjs.org,registry.yarnpkg.com,pypi.org,files.pythonhosted.org` | コンテナから到達できるホスト。例: Prisma を使うプロジェクトでは `binaries.prisma.sh` を追加 |
 | `AGENT_ORCHESTRATOR_MEMORY` / `_CPUS` / `_PIDS` | `4g` / `2` / `512` | ステップコンテナの資源上限。モノレポの並列 typecheck が SIGKILL される場合はメモリを増やす |
 | `AGENT_ORCHESTRATOR_PNPM_MIN_RELEASE_AGE` | （未設定 = pnpm 既定） | pnpm 12 の supply-chain policy（公開からの最小経過時間）。ホストで承認済みの lockfile がサンドボックスで拒否される場合に `0` 等を設定（D-26） |
 | `AGENT_ORCHESTRATOR_SANDBOX_IMAGE` / `_EGRESS_IMAGE` | `agent-orchestrator-sandbox:0.1.0` / `agent-orchestrator-egress-proxy:0.1.0` | ピン留めイメージ |
@@ -108,13 +108,27 @@ Run の起動前には、変更前のリポジトリに対して検証プロフ�
 
 ## 検証プロファイル
 
-`node-pnpm` / `node-npm` / `node-yarn`（Yarn 1）。lockfile（`pnpm-lock.yaml` / `package-lock.json` / `yarn.lock`）から自動で選びます。対象リポジトリの `package.json` に `typecheck` / `lint` / `test:run` scripts が必要です。インストールは lockfile 固定・インストール時スクリプト無効で行います。Yarn 2+（Berry）と bun は未対応です（v0.3、D-44）。npm は実 CLI で完了まで確認済み、Yarn 1 は実装済みですが開発環境で `registry.yarnpkg.com` からの取得が遅く実機確認が未完了です（`docs/FINAL_REPORT.md` 0¹² 節）。実行コマンドは固定（`pnpm install --frozen-lockfile --ignore-scripts` → `pnpm run typecheck` → `pnpm run lint` → `pnpm run test:run`）で、task.yaml から任意コマンドは実行できません。
+対象リポジトリのファイルから自動で選びます（`package.json` があれば Node、次に `uv.lock`、次に `requirements.txt`）。どのプロファイルも「lockfile で固定した版だけを入れる」「任意のシェルコマンドは実行しない」条件は共通で、task.yaml から任意コマンドは実行できません。
+
+| プロファイル | 判定 | インストール | 検証コマンド |
+|---|---|---|---|
+| `node-pnpm` | `pnpm-lock.yaml` | `pnpm install --frozen-lockfile --ignore-scripts` | `pnpm run typecheck` / `lint` / `test:run`（`package.json` の scripts が必要） |
+| `node-npm` | `package-lock.json` | `npm ci --ignore-scripts --no-audit --no-fund` | `npm run …` |
+| `node-yarn` | `yarn.lock`（Yarn 1） | `yarn install --frozen-lockfile --ignore-scripts --non-interactive` | `yarn run …` |
+| `python-uv` | `pyproject.toml` + `uv.lock` | `uv sync --frozen` | `uv run --frozen --no-sync ruff check .` / `pytest -q` / `mypy .` または `pyright`（無ければ `python -m compileall`） |
+| `python-pip` | `requirements.txt` | `python3 -m venv .venv` → `.venv/bin/python -m pip install -r requirements*.txt` | `.venv/bin/python -m ruff check .` / `pytest -q` / … |
+
+Python（v0.3、D-45）の検証ツールは依存に宣言されたものだけを使います（lint: ruff か flake8、test: pytest、typecheck: mypy か pyright。lint / test のツールが無いプロジェクトは実行不可）。上書きや生成物の script は `pyproject.toml` の `[tool.agent-orchestrator.scripts]` に書けます（値は `python` / `ruff` / `pytest` など許可されたツール名で始まるもののみ）。サンドボックスの Python は 3.11（Debian bookworm）で、`requires-python` がこれを許すかを事前診断で確認します。Node の `--ignore-scripts` に相当する抑止は無いため、wheel の無い依存は sdist のビルドが隔離コンテナ内で実行されます（事前診断で「未確認」として表示）。Yarn 2+（Berry）、bun、poetry / pdm / pipenv の lockfile、conda は未対応です（D-44 / D-45）。npm と Python（uv）は実 CLI で完了まで確認済み、Yarn 1 は実装済みですが開発環境で `registry.yarnpkg.com` からの取得が遅く実機確認が未完了です（`docs/FINAL_REPORT.md` 0¹² / 0¹³ 節）。
+
+## サンドボックスの版（固定版 / 最新版）
+
+サンドボックスのベースイメージ（node:22 bookworm-slim）と同梱ツール（Claude Code / Codex / pnpm / uv）の版は、「サンドボックスを準備する / 更新する」で **固定版**（マニフェストに固定したダイジェストと版。再現性を優先、既定）か **最新版**（取得時点の最新。脆弱性対応を優先）を選べます（v0.3、D-46。開発環境では `pnpm sandbox:build --policy latest`）。最新版でも取得したダイジェストに固定してビルドし、入った版はイメージのラベルと `/etc/agent-orchestrator/versions.json` に記録されます。環境チェックが同梱版を表示し、npm レジストリに新しい版があれば知らせます（最新版方針では警告、固定版では情報。到達できなければ「未確認」）。自動更新はしません。
 
 ## セキュリティ・隔離の設計
 
 - **実行環境**: Run ごとに使い捨てコンテナ（`docker run --rm`）。非 root（uid 1001）、`--cap-drop ALL`、`--security-opt no-new-privileges`、read-only root FS、`--pids-limit` / `--cpus` / `--memory`、Docker socket 非マウント。
 - **ワークスペース**: 元リポジトリから detached clone（remote 削除・hooks 無効）を作り、Run ごとの名前付きボリュームに tar で同期。Builder は `/workspace` のみ書込可、Reviewer は read-only マウント。レビュー前後のツリーハッシュ一致を完了条件にする。bind mount は使わない（この環境の Docker Desktop で I/O エラーになることを実測。`docs/DECISIONS.md` D-18）。
-- **ネットワーク**: Run ごとの `--internal` ネットワーク + allowlist CONNECT プロキシ。既定の許可先は `api.anthropic.com, api.openai.com, chatgpt.com, auth.openai.com, registry.npmjs.org`（`AGENT_ORCHESTRATOR_EGRESS_ALLOWLIST`）。typecheck / lint / test はネットワーク無し。
+- **ネットワーク**: Run ごとの `--internal` ネットワーク + allowlist CONNECT プロキシ。既定の許可先は `api.anthropic.com, api.openai.com, chatgpt.com, auth.openai.com, registry.npmjs.org, registry.yarnpkg.com, pypi.org, files.pythonhosted.org`（`AGENT_ORCHESTRATOR_EGRESS_ALLOWLIST`）。typecheck / lint / test はネットワーク無し。
 - **CLI 権限**: `--dangerously-skip-permissions` / `bypassPermissions` / `danger-full-access` は argv 組み立て時に拒否。Builder は `--permission-mode acceptEdits --permission-prompts none` + ツール allowlist、対象リポジトリの `.claude/settings`（hooks）は読み込まない。Reviewer は `--sandbox read-only`。
 - **認証情報**: ホストの設定済み認証を環境変数（Claude）または 0600 のファイル（Codex、Run 終了時にボリュームごと削除）で注入。ログ・イベント・レポートはマスキング。
 - **入力検証**: すべての AI 出力と YAML を Zod + JSON Schema で二重検証。IPC は method allowlist と Zod params。子プロセスは常に `shell:false`、コマンド名 allowlist。
@@ -200,7 +214,7 @@ node scripts/live-policy-loop.mjs --name <id> --repo <path> --task tests/fixture
 - WSL2 ディストリビューション内で runner を動かす構成は未実測（Docker Desktop の WSL 連携が必要）。
 - egress プロキシは TLS を終端しないため、許可ホストへの通信内容は検査しない。
 - `pnpm install --ignore-scripts` のため postinstall が必要な依存を持つプロジェクトでは検証が失敗し得る（`NEEDS_HUMAN`）。
-- 検証プロファイルは `node-pnpm` のみ。
+- 検証プロファイルは Node（pnpm / npm / Yarn 1）と Python（uv / pip）。Yarn 2+、bun、poetry / pdm / pipenv、conda、他の言語は未対応。Python の sdist ビルドは抑止できない（隔離内で実行）。
 - Reviewer（Codex）コンテナは bubblewrap を動かすため、Docker 既定 seccomp に `unshare/clone/mount/umount2/pivot_root` だけを追加したカスタムプロファイルを使う（capability は全て落としたまま。`docs/DECISIONS.md` D-22）。
 - Builder の試行上限は 3 回（初回 + 修正 2 回）。上限到達・判断不能はすべて人間へ戻す。
 - 「完了」はゲート通過の意味であり、バグが無いことやセキュリティの完全性を保証しない。最終反映はユーザーが手動で行う。

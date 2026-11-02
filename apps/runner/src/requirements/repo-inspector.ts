@@ -4,6 +4,7 @@ import { join, relative, resolve, sep } from 'node:path';
 import type { Fact, GeneratedInput, ProjectInfo } from '@agent-orchestrator/contracts';
 import type { RunnerConfig } from '../config.js';
 import { diagnoseProject } from './diagnosis.js';
+import { parsePyproject, parseRequirements } from './python-project.js';
 import { detectGeneratedFiles, detectGenerationScripts, extractGeneratorPaths, generationFacts, generatorInputFacts, type GeneratorAnalysis } from './generated.js';
 import { checkProfileReadiness, detectProfileFromFiles } from '../verification/profiles.js';
 import { collectEslintSettings, parseJsonc } from '../policy-gate.js';
@@ -22,6 +23,11 @@ export interface RepoDigest {
   truncated: boolean;
   tree: string[];
   packageJson: { name?: string; scripts?: Record<string, string>; dependencies?: string[]; devDependencies?: string[] } | null;
+  /** Python: pyproject.toml の要約（v0.3、D-45） */
+  pyproject: { name: string | null; dependencies: string[]; requiresPython: string | null; scripts: Record<string, string> } | null;
+  /** 生成スクリプト等の名前 → コマンド（Node は package.json の scripts、Python は [tool.agent-orchestrator.scripts]） */
+  projectScripts: Record<string, string>;
+  language: 'node' | 'python' | 'unknown';
   /** 生成スクリプトの入力解析（v0.2.2、D-42）。script 名 → 解析結果 */
   generators: Record<string, GeneratorAnalysis>;
   readmeExcerpt: string | null;
@@ -64,6 +70,22 @@ const FRAMEWORK_DEPS: Array<[RegExp, string]> = [
   [/^@angular\/core$/, 'Angular'],
   [/^@tauri-apps\/api$/, 'Tauri'],
   [/^electron$/, 'Electron']
+];
+const PY_FRAMEWORK_DEPS: Array<[RegExp, string]> = [
+  [/^django$/, 'Django'],
+  [/^fastapi$/, 'FastAPI'],
+  [/^flask$/, 'Flask'],
+  [/^starlette$/, 'Starlette'],
+  [/^sqlalchemy$/, 'SQLAlchemy'],
+  [/^pydantic$/, 'Pydantic'],
+  [/^celery$/, 'Celery'],
+  [/^streamlit$/, 'Streamlit']
+];
+const PY_TEST_DEPS: Array<[RegExp, string]> = [
+  [/^pytest$/, 'pytest'],
+  [/^hypothesis$/, 'Hypothesis'],
+  [/^tox$/, 'tox'],
+  [/^nox$/, 'nox']
 ];
 const TEST_DEPS: Array<[RegExp, string]> = [
   [/^vitest$/, 'Vitest'],
@@ -180,7 +202,11 @@ export class RepoInspector {
         pkg = null;
       }
     }
-    const deps = Object.keys({ ...(pkg?.dependencies ?? {}), ...(pkg?.devDependencies ?? {}) });
+    // Python（v0.3、D-45）: package.json が無く pyproject.toml / requirements.txt があるときだけ Python として扱う
+    const pyproject = !pkg && files.includes('pyproject.toml') ? parsePyproject(readText('pyproject.toml')) : null;
+    const requirements = !pkg && files.includes('requirements.txt') ? parseRequirements(readText('requirements.txt')) : null;
+    const language: 'node' | 'python' | 'unknown' = pkg ? 'node' : pyproject || requirements ? 'python' : 'unknown';
+    const deps = language === 'python' ? [...new Set([...(pyproject?.dependencies ?? []), ...(requirements?.names ?? [])])] : Object.keys({ ...(pkg?.dependencies ?? {}), ...(pkg?.devDependencies ?? {}) });
     const facts: Fact[] = [];
     const fact = (key: string, value: string, source: string, confidence: Fact['confidence']) => facts.push({ key, value, source, confidence });
 
@@ -204,15 +230,22 @@ export class RepoInspector {
     else if (files.includes('yarn.lock')) packageManager = 'yarn';
     else if (files.includes('package-lock.json')) packageManager = 'npm';
     else if (files.includes('bun.lockb') || files.includes('bun.lock')) packageManager = 'bun';
-    if (packageManager) fact('package_manager', packageManager, packageManager === 'pnpm' ? 'pnpm-lock.yaml' : packageManager === 'yarn' ? 'yarn.lock' : packageManager === 'npm' ? 'package-lock.json' : 'bun.lock', 'confirmed');
+    else if (language === 'python' && files.includes('uv.lock')) packageManager = 'uv';
+    else if (language === 'python' && files.includes('poetry.lock')) packageManager = 'poetry';
+    else if (language === 'python' && files.includes('requirements.txt')) packageManager = 'pip';
+    if (language === 'python') {
+      fact('language', `Python${pyproject?.requiresPython ? `（requires-python ${pyproject.requiresPython}）` : ''}`, pyproject ? 'pyproject.toml' : 'requirements.txt', 'confirmed');
+      if (pyproject && Object.keys(pyproject.scripts).length > 0) fact('project.scripts', Object.entries(pyproject.scripts).map(([k, v]) => `${k} → ${v}`).join('; '), 'pyproject.toml#tool.agent-orchestrator.scripts', 'confirmed');
+    }
+    if (packageManager) fact('package_manager', packageManager, packageManager === 'pnpm' ? 'pnpm-lock.yaml' : packageManager === 'yarn' ? 'yarn.lock' : packageManager === 'npm' ? 'package-lock.json' : packageManager === 'uv' ? 'uv.lock' : packageManager === 'pip' ? 'requirements.txt' : packageManager === 'poetry' ? 'poetry.lock' : 'bun.lock', 'confirmed');
     else if (pkg) fact('package_manager', 'lockfile が無く不明', 'package.json', 'unknown');
 
     // frameworks / tests / db / auth
-    const frameworks = FRAMEWORK_DEPS.filter(([re]) => deps.some((d) => re.test(d))).map(([, name]) => name);
+    const frameworks = (language === 'python' ? PY_FRAMEWORK_DEPS : FRAMEWORK_DEPS).filter(([re]) => deps.some((d) => re.test(d))).map(([, name]) => name);
     for (const f of frameworks) fact('framework', f, 'package.json', 'confirmed');
-    const testFrameworks = TEST_DEPS.filter(([re]) => deps.some((d) => re.test(d))).map(([, name]) => name);
+    const testFrameworks = (language === 'python' ? PY_TEST_DEPS : TEST_DEPS).filter(([re]) => deps.some((d) => re.test(d))).map(([, name]) => name);
     for (const t of testFrameworks) fact('test_framework', t, 'package.json', 'confirmed');
-    if (pkg && testFrameworks.length === 0) fact('test_framework', 'テストフレームワークの依存が見つかりません', 'package.json', 'unknown');
+    if ((pkg || language === 'python') && testFrameworks.length === 0) fact('test_framework', 'テストフレームワークの依存が見つかりません', language === 'python' ? 'pyproject.toml / requirements.txt' : 'package.json', 'unknown');
     const dbDeps = deps.filter((d) => DB_DEP_RE.test(d));
     if (dbDeps.length > 0) fact('database', dbDeps.join(', '), 'package.json', 'confirmed');
     else if (pkg) fact('database', 'DB 関連の依存が見つかりません', 'package.json', 'unknown');
@@ -247,13 +280,13 @@ export class RepoInspector {
     }
     if (files.includes('pnpm-workspace.yaml')) fact('monorepo', 'pnpm workspace', 'pnpm-workspace.yaml', 'confirmed');
     // 生成物（v0.2.1、D-41）: 生成スクリプト候補と、ヘッダーに自動生成の記載があるファイル
-    const scriptsMap = Object.fromEntries(Object.entries(pkg?.scripts ?? {}).filter(([, v]) => typeof v === 'string')) as Record<string, string>;
-    const generationCandidates = detectGenerationScripts(scriptsMap, files);
+    const scriptsMap = language === 'python' ? { ...(pyproject?.scripts ?? {}) } : (Object.fromEntries(Object.entries(pkg?.scripts ?? {}).filter(([, v]) => typeof v === 'string')) as Record<string, string>);
+    const generationCandidates = language === 'python' ? Object.entries(scriptsMap).map(([script, command]) => ({ script, command, outputs: [] as string[] })) : detectGenerationScripts(scriptsMap, files);
     facts.push(...generationFacts(generationCandidates, detectGeneratedFiles(files, (p) => readText(p)?.slice(0, 600) ?? null, scriptsMap)));
     // 生成スクリプトの入力依存（v0.2.2、D-42）: `node <file>` の生成器を静的解析し、入力を Git 追跡 / 管理外 / 不明に分類する
     const generators: Record<string, GeneratorAnalysis> = {};
     for (const c of generationCandidates) {
-      const fileMatch = /^(?:node|tsx)\s+(?:--[\w-]+\s+)*([\w./-]+\.(?:mjs|cjs|js|ts))(?:\s|$)/.exec(c.command.trim());
+      const fileMatch = /^(?:node|tsx|python3?|uv\s+run)\s+(?:--?[\w-]+\s+)*([\w./-]+\.(?:mjs|cjs|js|ts|py))(?:\s|$)/.exec(c.command.trim());
       const file = fileMatch && files.includes(fileMatch[1]!) ? fileMatch[1]! : null;
       const source = file ? readText(file) : null;
       if (!file || !source) {
@@ -283,7 +316,7 @@ export class RepoInspector {
 
     // 事前診断（v0.2.0、D-38）: 読み取り専用。fail は problems にも載せて開始を止める。warn / unverified は facts にしてヒアリングに渡す
     const workspacePackages = files.filter((f) => /^(apps|packages)\/[^/]+\/package\.json$/.test(f));
-    const diagnosis = diagnoseProject({ files, readText, packageManager, verificationProfile: profileName, verificationReady: readiness.ready, verificationDetail: readiness.detail, isClean, egressAllowlist: this.config.egressAllowlist, workspacePackages });
+    const diagnosis = diagnoseProject({ files, readText, packageManager, verificationProfile: profileName, repoPath: root, verificationReady: readiness.ready, verificationDetail: readiness.detail, isClean, egressAllowlist: this.config.egressAllowlist, workspacePackages });
     for (const c of diagnosis.checks) {
       if (c.status === 'fail' && !['verification', 'worktree'].includes(c.id)) problems.push({ code: `DIAG_${c.id.toUpperCase()}`, message: c.detail, fix: c.fix });
       if (c.status !== 'ok') fact(`env.${c.id}`, `${c.status === 'unverified' ? '未確認: ' : c.status === 'warn' ? '注意: ' : '問題: '}${c.detail}`, c.id === 'supply_chain' ? 'pnpm-workspace.yaml / .npmrc' : c.id === 'network' ? 'lockfile / .npmrc / package.json' : 'package.json', c.status === 'unverified' ? 'unknown' : 'confirmed');
@@ -297,6 +330,9 @@ export class RepoInspector {
       truncated: files.length > 400,
       tree: files.slice(0, 400),
       generators,
+      pyproject: pyproject ? { name: pyproject.name, dependencies: pyproject.dependencies, requiresPython: pyproject.requiresPython, scripts: pyproject.scripts } : null,
+      projectScripts: scriptsMap,
+      language,
       packageJson: pkg ? { ...(pkg.name ? { name: pkg.name } : {}), scripts: pkg.scripts ?? {}, dependencies: Object.keys(pkg.dependencies ?? {}), devDependencies: Object.keys(pkg.devDependencies ?? {}) } : null,
       readmeExcerpt: readme ? readme.split('\n').slice(0, 60).join('\n').slice(0, 4000) : null,
       authHints: [...authDeps.map((d) => `dependency: ${d}`), ...authPaths.map((p) => `file: ${p}`)],
@@ -333,6 +369,10 @@ export function renderDigest(d: RepoDigest): string {
   if (d.packageJson) {
     lines.push('package.json:', `  name: ${d.packageJson.name ?? '(none)'}`, `  scripts: ${JSON.stringify(d.packageJson.scripts ?? {})}`, `  dependencies: ${(d.packageJson.dependencies ?? []).join(', ')}`, `  devDependencies: ${(d.packageJson.devDependencies ?? []).join(', ')}`);
   }
+  if (d.pyproject) {
+    lines.push('pyproject.toml:', `  name: ${d.pyproject.name ?? '(none)'}`, `  requires-python: ${d.pyproject.requiresPython ?? '(none)'}`, `  dependencies: ${d.pyproject.dependencies.join(', ')}`, `  [tool.agent-orchestrator.scripts]: ${JSON.stringify(d.pyproject.scripts)}`);
+  }
+  lines.push(`language: ${d.language}`);
   if (d.workspacePackages.length > 0) lines.push(`workspace packages: ${d.workspacePackages.join(', ')}`);
   if (d.configFiles.length > 0) lines.push(`config files: ${d.configFiles.join(', ')}`);
   if (d.authHints.length > 0) lines.push(`auth hints: ${d.authHints.join('; ')}`);

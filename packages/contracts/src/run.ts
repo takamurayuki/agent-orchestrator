@@ -86,7 +86,7 @@ export const PolicyViolationSchema = z.strictObject({
 export type PolicyViolation = z.infer<typeof PolicyViolationSchema>;
 
 /** Policy Gate（v2.1）の検出結果。AI レビューとは独立した静的チェック。approved はベースコミットの人間管理の例外に一致した場合のみ true */
-export const POLICY_RULE_IDS = ['PG-ESLINT-DISABLE', 'PG-TS-SUPPRESS', 'PG-TEST-SKIP', 'PG-TEST-DELETED', 'PG-VERIFY-SCRIPT', 'PG-TSCONFIG-RELAXED', 'PG-ESLINT-RELAXED', 'PG-TESTCONFIG-RELAXED', 'PG-UNPARSEABLE', 'PG-ANALYSIS-ERROR'] as const;
+export const POLICY_RULE_IDS = ['PG-ESLINT-DISABLE', 'PG-TS-SUPPRESS', 'PG-TEST-SKIP', 'PG-TEST-DELETED', 'PG-VERIFY-SCRIPT', 'PG-TSCONFIG-RELAXED', 'PG-ESLINT-RELAXED', 'PG-TESTCONFIG-RELAXED', 'PG-UNPARSEABLE', 'PG-ANALYSIS-ERROR', 'PG-PY-NOQA', 'PG-PY-TYPE-IGNORE', 'PG-PY-TEST-SKIP', 'PG-PY-CONFIG-RELAXED'] as const;
 export const PolicyFindingSchema = z.strictObject({
   ruleId: z.enum(POLICY_RULE_IDS),
   severity: z.enum(['blocking', 'warning']),

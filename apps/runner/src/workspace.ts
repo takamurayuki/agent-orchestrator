@@ -21,7 +21,7 @@ export interface WorkspaceManagerOptions {
   excludes?: string[];
 }
 
-const DEFAULT_EXCLUDES = ['node_modules', '.pnpm-store', '.npm-cache', '.yarn-cache', 'dist', 'build', 'coverage', '.turbo', '.next', '.svelte-kit'];
+const DEFAULT_EXCLUDES = ['node_modules', '.pnpm-store', '.npm-cache', '.yarn-cache', '.venv', '.uv-cache', '.pip-cache', '__pycache__', '.pytest_cache', '.mypy_cache', '.ruff_cache', 'dist', 'build', 'coverage', '.turbo', '.next', '.svelte-kit'];
 const SHA_RE = /^[0-9a-f]{40}$/;
 
 export class GitError extends Error {

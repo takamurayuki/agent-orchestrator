@@ -1,6 +1,6 @@
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import type { SandboxManifest, SandboxSetupState, SandboxSetupStep } from '@agent-orchestrator/contracts';
+import type { SandboxManifest, SandboxSetupState, SandboxSetupStep, SandboxVersionPolicy } from '@agent-orchestrator/contracts';
 import type { RunnerConfig } from '../config.js';
 import { maskSecrets } from '../masking.js';
 import { runProcess, type ProcessRunner } from '../process-runner.js';
@@ -9,8 +9,8 @@ import { SANDBOX_FILES, SANDBOX_MANIFEST } from './assets.generated.js';
 /**
  * サンドボックス準備（v0.1.0 公開準備、D-36）。GUI の「サンドボックスを準備する」から呼ばれ、固定の手順だけを実行する:
  *   1. docker info（デーモン到達）
- *   2. ピン留めしたベースイメージ（タグ@ダイジェスト）を pull — ユーザーの明示的な同意（acknowledgePull）が必要
- *   3. ベースイメージの RepoDigests にマニフェストのダイジェストが含まれることを検証（不一致なら停止）
+ *   2. ベースイメージを pull — ユーザーの明示的な同意（acknowledgePull）が必要。pinned: タグ@ダイジェスト / latest: 浮動タグ（v0.3、D-46）
+ *   3. pinned: RepoDigests にマニフェストのダイジェストが含まれることを検証（不一致なら停止）/ latest: 取得したダイジェストを記録してビルドに固定
  *   4. 埋め込みコンテキストを一時ディレクトリに書き出し、egress プロキシ / サンドボックスを docker build（--pull=false、ラベル付与）
  *   5. ビルド結果のラベル（version / base-digest）を検証。失敗したイメージは rmi して使わせない
  * 任意のコマンドは実行しない（docker の固定引数のみ）。失敗はすべて fail-closed（原因と復旧方法を返す）。
@@ -34,7 +34,7 @@ export class SandboxSetupError extends Error {
 
 const STEP_DEFS: Array<{ id: string; label: string }> = [
   { id: 'docker', label: 'Docker デーモンの確認' },
-  { id: 'base.pull', label: 'ベースイメージの取得（Docker Hub、ピン留め）' },
+  { id: 'base.pull', label: 'ベースイメージの取得（Docker Hub）' },
   { id: 'base.verify', label: 'ベースイメージのダイジェスト検証' },
   { id: 'build.proxy', label: 'egress プロキシイメージのビルド' },
   { id: 'build.sandbox', label: 'サンドボックスイメージのビルド' },
@@ -46,6 +46,8 @@ export function manifestForConfig(config: RunnerConfig): SandboxManifest {
     version: SANDBOX_MANIFEST.version,
     baseImage: SANDBOX_MANIFEST.baseImage,
     baseDigest: SANDBOX_MANIFEST.baseDigest,
+    baseImageLatest: SANDBOX_MANIFEST.baseImageLatest,
+    toolchain: { ...SANDBOX_MANIFEST.toolchain },
     images: SANDBOX_MANIFEST.images.map((i) => ({ id: i.id, tag: i.id === 'sandbox' ? config.sandboxImage : config.egressProxyImage, label: i.label }))
   };
 }
@@ -54,6 +56,7 @@ export class SandboxSetupService {
   private readonly run: ProcessRunner;
   private state: SandboxSetupState;
   private controller: AbortController | null = null;
+  private policy: SandboxVersionPolicy = 'pinned';
 
   constructor(private readonly deps: SandboxSetupDeps) {
     this.run = deps.run ?? runProcess;
@@ -69,9 +72,11 @@ export class SandboxSetupService {
   }
 
   /** 準備を開始する（非同期に進み、進捗は onProgress / status() で取れる）。 */
-  start(params: { acknowledgePull: boolean }): SandboxSetupState {
+  start(params: { acknowledgePull: boolean; versionPolicy?: SandboxVersionPolicy }): SandboxSetupState {
     if (params.acknowledgePull !== true) throw new SandboxSetupError('INVALID_PARAMS', 'ベースイメージの取得への同意（acknowledgePull）が必要です');
+    if (params.versionPolicy !== undefined && params.versionPolicy !== 'pinned' && params.versionPolicy !== 'latest') throw new SandboxSetupError('INVALID_PARAMS', 'versionPolicy は pinned か latest です');
     if (this.state.state === 'running') throw new SandboxSetupError('INVALID_STATE', 'サンドボックスの準備は既に実行中です');
+    this.policy = params.versionPolicy ?? 'pinned';
     this.state = { ...this.idle(), state: 'running', startedAt: this.nowIso() };
     this.controller = new AbortController();
     void this.execute(this.controller.signal);
@@ -118,7 +123,10 @@ export class SandboxSetupService {
 
   private async execute(signal: AbortSignal): Promise<void> {
     const manifest = this.state.manifest;
-    const base = `${manifest.baseImage}@${manifest.baseDigest}`;
+    const latest = this.policy === 'latest';
+    // pinned: タグ@ダイジェスト（Docker がダイジェスト照合）/ latest: 浮動タグ（取得後に実際のダイジェストへ固定してビルド）
+    const base = latest ? (manifest.baseImageLatest ?? manifest.baseImage) : `${manifest.baseImage}@${manifest.baseDigest}`;
+    let resolvedDigest = manifest.baseDigest;
     const buildRoot = join(this.deps.config.appDataDir, 'sandbox-build', String(Date.now()));
     const cancelled = () => {
       if (!signal.aborted) return false;
@@ -138,7 +146,7 @@ export class SandboxSetupService {
       this.step('docker', 'ok', `server ${info.stdout.trim().split('|')[0]}`);
 
       // 2. base pull（同意済み）
-      this.step('base.pull', 'running', base);
+      this.step('base.pull', 'running', `${base}（${latest ? '最新版' : '固定版'}）`);
       const pull = await this.docker(['pull', base], signal, 15 * 60_000);
       if (cancelled()) return;
       if (!pull.ok) {
@@ -151,11 +159,18 @@ export class SandboxSetupService {
       this.step('base.verify', 'running');
       const digests = await this.docker(['image', 'inspect', '--format', '{{json .RepoDigests}}', base], signal, 30_000);
       if (cancelled()) return;
-      if (!digests.ok || !digests.stdout.includes(manifest.baseDigest)) {
+      if (latest) {
+        const m = /@(sha256:[0-9a-f]{64})/.exec(digests.stdout);
+        if (!digests.ok || !m) {
+          this.fail('base.verify', 'BASE_DIGEST_UNKNOWN', `取得したベースイメージのダイジェストを読み取れません: ${digests.stdout.trim().slice(0, 200)}`, '「再試行」を押してください。繰り返す場合は固定版を選んでください');
+          return;
+        }
+        resolvedDigest = m[1]!;
+      } else if (!digests.ok || !digests.stdout.includes(manifest.baseDigest)) {
         this.fail('base.verify', 'BASE_DIGEST_MISMATCH', `取得したベースイメージのダイジェストがマニフェスト（${manifest.baseDigest}）と一致しません: ${digests.stdout.trim().slice(0, 200)}`, '改ざんや取り違えの可能性があります。処理を停止しました。開発者に連絡してください（イメージは使用しません）');
         return;
       }
-      this.step('base.verify', 'ok', manifest.baseDigest);
+      this.step('base.verify', 'ok', latest ? `取得した版に固定: ${resolvedDigest}` : manifest.baseDigest);
 
       // 4. builds
       for (const img of manifest.images) {
@@ -169,8 +184,10 @@ export class SandboxSetupService {
           mkdirSync(dirname(target), { recursive: true });
           writeFileSync(target, content, 'utf8');
         }
+        const nodeImage = latest ? `${base}@${resolvedDigest}` : base;
+        const versionArgs = latest ? ['--build-arg', 'VERSION_POLICY=latest', '--build-arg', 'PNPM_VERSION=latest', '--build-arg', 'CLAUDE_CODE_VERSION=latest', '--build-arg', 'CODEX_VERSION=latest', '--build-arg', 'UV_VERSION=latest'] : ['--build-arg', 'VERSION_POLICY=pinned'];
         const build = await this.docker(
-          ['build', '--pull=false', '-f', join(context, 'Dockerfile'), '-t', img.tag, '--build-arg', `NODE_IMAGE=${base}`, '--label', `${SANDBOX_MANIFEST.labels.version}=${manifest.version}`, '--label', `${SANDBOX_MANIFEST.labels.baseDigest}=${manifest.baseDigest}`, context],
+          ['build', '--pull=false', '-f', join(context, 'Dockerfile'), '-t', img.tag, '--build-arg', `NODE_IMAGE=${nodeImage}`, ...versionArgs, '--label', `${SANDBOX_MANIFEST.labels.version}=${manifest.version}`, '--label', `${SANDBOX_MANIFEST.labels.baseDigest}=${resolvedDigest}`, '--label', `${SANDBOX_MANIFEST.labels.versionPolicy}=${this.policy}`, '--label', `${SANDBOX_MANIFEST.labels.builtAt}=${this.nowIso()}`, context],
           signal,
           30 * 60_000
         );
@@ -187,13 +204,13 @@ export class SandboxSetupService {
       for (const img of manifest.images) {
         const v = await this.docker(['image', 'inspect', '--format', `{{index .Config.Labels "${SANDBOX_MANIFEST.labels.version}"}}|{{index .Config.Labels "${SANDBOX_MANIFEST.labels.baseDigest}"}}`, img.tag], signal, 30_000);
         if (cancelled()) return;
-        if (!v.ok || v.stdout.trim() !== `${manifest.version}|${manifest.baseDigest}`) {
+        if (!v.ok || v.stdout.trim() !== `${manifest.version}|${resolvedDigest}`) {
           await this.docker(['rmi', '-f', img.tag], signal, 60_000);
           this.fail('verify', 'IMAGE_VERIFY_FAILED', `${img.tag} の整合性検証に失敗しました（${v.stdout.trim().slice(0, 120) || v.stderr.trim().slice(0, 120)}）。イメージは削除しました`, '「再試行」で作り直してください。繰り返す場合は開発者に連絡してください');
           return;
         }
       }
-      this.step('verify', 'ok', `version ${manifest.version} / base ${manifest.baseDigest.slice(0, 19)}`);
+      this.step('verify', 'ok', `version ${manifest.version} / base ${resolvedDigest.slice(0, 19)} / ${latest ? '最新版（取得時点）' : '固定版'}`);
       this.state = { ...this.state, state: 'succeeded', finishedAt: this.nowIso() };
       this.emit();
     } catch (err) {

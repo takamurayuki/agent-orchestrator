@@ -241,9 +241,13 @@ export type RunReportResult = z.infer<typeof RunReportResultSchema>;
 
 // ---- サンドボックス準備（v0.1.0 公開準備）: GUI から固定手順でイメージを取得・ビルド・検証する ----
 
+export const SANDBOX_VERSION_POLICIES = ['pinned', 'latest'] as const;
+export type SandboxVersionPolicy = (typeof SANDBOX_VERSION_POLICIES)[number];
 export const SandboxSetupParams = z.strictObject({
-  /** Docker Hub からピン留めしたベースイメージを取得することへの明示的な同意（これ無しでは外部取得しない） */
-  acknowledgePull: z.literal(true)
+  /** Docker Hub からベースイメージを取得することへの明示的な同意（これ無しでは外部取得しない） */
+  acknowledgePull: z.literal(true),
+  /** pinned: マニフェストで検証済みの版（ベースのダイジェスト、エージェント、pnpm、uv）/ latest: 取得時点の最新版（取得した版を記録する）。v0.3、D-46 */
+  versionPolicy: z.enum(SANDBOX_VERSION_POLICIES).default('pinned')
 });
 export const SandboxCancelParams = z.strictObject({});
 export const SandboxStatusParams = z.strictObject({});
@@ -260,6 +264,10 @@ export const SandboxManifestSchema = z.strictObject({
   version: z.string(),
   baseImage: z.string(),
   baseDigest: z.string(),
+  /** latest 方針で取得する浮動タグ（例 node:22-bookworm-slim） */
+  baseImageLatest: z.string().optional(),
+  /** pinned 方針で入れるツールチェーンの版（表示用） */
+  toolchain: z.record(z.string(), z.string()).optional(),
   images: z.array(z.strictObject({ id: z.string(), tag: z.string(), label: z.string() }))
 });
 export type SandboxManifest = z.infer<typeof SandboxManifestSchema>;

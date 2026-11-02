@@ -617,7 +617,9 @@ export const EMBEDDED_SCHEMAS: Record<string, Record<string, unknown>> = {
         "enum": [
           "node-pnpm",
           "node-npm",
-          "node-yarn"
+          "node-yarn",
+          "python-uv",
+          "python-pip"
         ]
       },
       "limits": {

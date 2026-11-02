@@ -42,7 +42,7 @@ export type ProcessRunner = (request: ProcessRequest) => Promise<ProcessResult>;
 const SHELL_META = /[;&|<>`$(){}[\]!*?~\n\r]/;
 
 /** argv に明らかなシェルメタ文字が含まれていても、shell:false なので解釈はされない。ただし CLI 名は固定の allowlist に限定する。 */
-export const ALLOWED_COMMANDS = new Set(['git', 'docker', 'claude', 'codex', 'node', 'pnpm', 'tar', 'wsl', 'wsl.exe', 'docker.exe', 'git.exe', 'node.exe', 'tar.exe', 'claude.exe', 'codex.exe', 'pnpm.cmd', 'claude.cmd', 'codex.cmd']);
+export const ALLOWED_COMMANDS = new Set(['git', 'docker', 'claude', 'codex', 'node', 'pnpm', 'npm', 'npm.cmd', 'npm.exe', 'tar', 'wsl', 'wsl.exe', 'docker.exe', 'git.exe', 'node.exe', 'tar.exe', 'claude.exe', 'codex.exe', 'pnpm.cmd', 'claude.cmd', 'codex.cmd']);
 
 export function assertAllowedCommand(command: string): void {
   const base = command.replace(/\\/g, '/').split('/').pop() ?? command;

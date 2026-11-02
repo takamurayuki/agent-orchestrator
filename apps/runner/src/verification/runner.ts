@@ -3,7 +3,7 @@ import type { VerifierInput } from '../engine.js';
 import { excerpt } from '../masking.js';
 import { CONTAINER_WORKSPACE, type SandboxExecutor } from '../isolation/types.js';
 import { verifyGeneratedArtifacts } from './generated.js';
-import { expectedCommandNames, getProfile } from './profiles.js';
+import { commandsFor, expectedCommandNames, getProfile, projectScripts } from './profiles.js';
 
 /** install（依存取得）の実行時間の下限。検証コマンド上限より短くはしない */
 export const INSTALL_TIMEOUT_FLOOR_MS = 10 * 60 * 1000;
@@ -34,7 +34,9 @@ export class SandboxVerifier {
     // 検証コマンドの上限（既定 300 秒）だけでは起動前検査で時間切れになりやすいので、install にだけ下限 10 分を与える。
     // 隔離・ネットワーク制限は変えない（同じサンドボックス・同じ egress allowlist）。Run 全体の制限時間（maxDurationSeconds）は別途適用される
     const installTimeout = Math.max(perCommandTimeout, INSTALL_TIMEOUT_FLOOR_MS);
-    for (const cmd of profile.commands) {
+    // プロジェクトに合わせたコマンド列（Node は固定、Python は pyproject / requirements から決める。任意コマンドは組み立てない）
+    const plan = commandsFor(input.profile, input.workspace.path);
+    for (const cmd of plan) {
       if (failed || input.signal.aborted) {
         missing.push(cmd.name);
         continue;
@@ -47,7 +49,7 @@ export class SandboxVerifier {
         aux: 'none',
         workdir: CONTAINER_WORKSPACE,
         // pnpm store はワークスペースボリューム内（tmpfs の /tmp に大量書込しない。同期からは除外される）
-        env: { ...this.extraEnv, CI: '1', FORCE_COLOR: '0', NODE_OPTIONS: '--max-old-space-size=2048', pnpm_config_store_dir: '/workspace/.pnpm-store', pnpm_config_cache_dir: '/workspace/.pnpm-store/cache', npm_config_cache: '/workspace/.npm-cache', YARN_CACHE_FOLDER: '/workspace/.yarn-cache', pnpm_config_manage_package_manager_versions: 'false', COREPACK_ENABLE_STRICT: '0', COREPACK_ENABLE_AUTO_PIN: '0' },
+        env: { ...this.extraEnv, CI: '1', FORCE_COLOR: '0', NODE_OPTIONS: '--max-old-space-size=2048', pnpm_config_store_dir: '/workspace/.pnpm-store', pnpm_config_cache_dir: '/workspace/.pnpm-store/cache', npm_config_cache: '/workspace/.npm-cache', YARN_CACHE_FOLDER: '/workspace/.yarn-cache', UV_CACHE_DIR: '/workspace/.uv-cache', PIP_CACHE_DIR: '/workspace/.pip-cache', UV_PROJECT_ENVIRONMENT: '/workspace/.venv', pnpm_config_manage_package_manager_versions: 'false', COREPACK_ENABLE_STRICT: '0', COREPACK_ENABLE_AUTO_PIN: '0' },
         network: cmd.network,
         timeoutMs: cmd.name === 'install' ? installTimeout : perCommandTimeout,
         signal: input.signal,
@@ -69,14 +71,14 @@ export class SandboxVerifier {
     }
     // 生成物の更新検証（v0.2.1、D-41）: プロファイルの検証がすべて通った後に、生成スクリプトを再実行して生成物が最新かを決定的に確認する
     if (!failed && missing.length === 0 && !input.signal.aborted && (input.generatedArtifacts?.length ?? 0) > 0) {
-      const env = { ...this.extraEnv, CI: '1', FORCE_COLOR: '0', NODE_OPTIONS: '--max-old-space-size=2048', pnpm_config_store_dir: '/workspace/.pnpm-store', pnpm_config_cache_dir: '/workspace/.pnpm-store/cache', npm_config_cache: '/workspace/.npm-cache', YARN_CACHE_FOLDER: '/workspace/.yarn-cache', pnpm_config_manage_package_manager_versions: 'false', COREPACK_ENABLE_STRICT: '0', COREPACK_ENABLE_AUTO_PIN: '0' };
-      const generated = await verifyGeneratedArtifacts(this.sandbox, { runId: input.runId, round: input.round, artifacts: input.generatedArtifacts ?? [], profile: input.profile, env, timeoutMs: perCommandTimeout, signal: input.signal, onLog: input.onLog });
+      const env = { ...this.extraEnv, CI: '1', FORCE_COLOR: '0', NODE_OPTIONS: '--max-old-space-size=2048', pnpm_config_store_dir: '/workspace/.pnpm-store', pnpm_config_cache_dir: '/workspace/.pnpm-store/cache', npm_config_cache: '/workspace/.npm-cache', YARN_CACHE_FOLDER: '/workspace/.yarn-cache', UV_CACHE_DIR: '/workspace/.uv-cache', PIP_CACHE_DIR: '/workspace/.pip-cache', UV_PROJECT_ENVIRONMENT: '/workspace/.venv', pnpm_config_manage_package_manager_versions: 'false', COREPACK_ENABLE_STRICT: '0', COREPACK_ENABLE_AUTO_PIN: '0' };
+      const generated = await verifyGeneratedArtifacts(this.sandbox, { runId: input.runId, round: input.round, artifacts: input.generatedArtifacts ?? [], profile: input.profile, projectScripts: projectScripts(input.profile, input.workspace.path), env, timeoutMs: perCommandTimeout, signal: input.signal, onLog: input.onLog });
       commands.push(...generated);
       if (generated.some((g) => g.exitCode !== 0 || g.timedOut)) failed = true;
     }
     return {
       profile: profile.name,
-      passed: !failed && missing.length === 0 && commands.length >= profile.commands.length,
+      passed: !failed && missing.length === 0 && commands.length >= plan.length,
       commands,
       missing,
       startedAt,

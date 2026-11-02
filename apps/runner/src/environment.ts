@@ -9,6 +9,17 @@ import { runProcess, type ProcessRunner } from './process-runner.js';
 import { CONTAINER_AUX, CONTAINER_WORKSPACE, PROXY_ALIAS, PROXY_PORT } from './isolation/types.js';
 import { SANDBOX_MANIFEST } from './sandbox/assets.generated.js';
 
+/** 'a.b.c' 同士の比較（数値部分のみ） */
+export function compareVersions(a: string, b: string): number {
+  const pa = a.split('.').map((x) => Number.parseInt(x, 10) || 0);
+  const pb = b.split('.').map((x) => Number.parseInt(x, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] ?? 0) - (pb[i] ?? 0);
+    if (d !== 0) return d;
+  }
+  return 0;
+}
+
 /**
  * EnvironmentAdapter（SPEC §2 クロス OS）。Tauri/Rust ↔ Node ↔ Docker(WSL2) の引き渡しとパス変換をここに閉じ込める。
  * - windows + Docker Desktop: docker CLI は Windows 側、コンテナは WSL2 の Linux VM で動く。bind mount は Windows パスをそのまま渡す
@@ -18,7 +29,7 @@ import { SANDBOX_MANIFEST } from './sandbox/assets.generated.js';
 export type ExecutionMode = EnvironmentReport['executionMode'];
 
 /** npm 製 CLI の JS エントリ（Windows の .cmd シム回避用） */
-const NPM_CLI_ENTRIES: Record<string, string> = { claude: '@anthropic-ai/claude-code/cli.js', codex: '@openai/codex/bin/codex.js' };
+const NPM_CLI_ENTRIES: Record<string, string> = { claude: '@anthropic-ai/claude-code/cli.js', codex: '@openai/codex/bin/codex.js', npm: 'npm/bin/npm-cli.js' };
 
 export interface EnvironmentAdapter {
   mode: ExecutionMode;
@@ -106,21 +117,26 @@ export class LocalEnvironmentAdapter implements EnvironmentAdapter {
       }
       // サンドボックスイメージ: 存在だけでなく、マニフェスト（version / ベースイメージのダイジェスト）と一致することを検証する（v0.1.0 公開準備）
       const setupFix = 'ホーム画面の「サンドボックスを準備する」から取得・ビルドしてください（開発環境では pnpm sandbox:build）';
+      let sandboxImageInfo: { policy: 'pinned' | 'latest'; builtAt: string | null } | null = null;
       for (const [id, label, image] of [
         ['docker.image.sandbox', 'サンドボックスイメージ', this.options.config.sandboxImage],
         ['docker.image.proxy', 'egress プロキシイメージ', this.options.config.egressProxyImage]
       ] as const) {
-        const r = await this.run({ command: 'docker', args: ['image', 'inspect', '--format', `{{.Id}}|{{index .Config.Labels "${SANDBOX_MANIFEST.labels.version}"}}|{{index .Config.Labels "${SANDBOX_MANIFEST.labels.baseDigest}"}}`, image], inheritEnv: true, timeoutMs: 30_000 });
+        const r = await this.run({ command: 'docker', args: ['image', 'inspect', '--format', `{{.Id}}|{{index .Config.Labels "${SANDBOX_MANIFEST.labels.version}"}}|{{index .Config.Labels "${SANDBOX_MANIFEST.labels.baseDigest}"}}|{{index .Config.Labels "${SANDBOX_MANIFEST.labels.versionPolicy}"}}|{{index .Config.Labels "${SANDBOX_MANIFEST.labels.builtAt}"}}`, image], inheritEnv: true, timeoutMs: 30_000 });
         if (r.exitCode !== 0) {
           add({ id, label, status: 'fail', detail: `${image} が見つかりません`, fix: setupFix });
           continue;
         }
-        const [imageId, version, baseDigest] = r.stdout.trim().split('|');
-        const verified = version === SANDBOX_MANIFEST.version && baseDigest === SANDBOX_MANIFEST.baseDigest;
-        add({ id, label, status: verified ? 'ok' : 'fail', detail: verified ? `${image} (${(imageId ?? '').slice(0, 19)}) 検証済み: version ${version}, base ${(baseDigest ?? '').slice(0, 19)}` : `${image} はマニフェストと一致しません（version=${version || '（なし）'}, base=${(baseDigest || '（なし）').slice(0, 19)}）。使用しません`, fix: verified ? null : `${setupFix}。既存のイメージは作り直されます` });
+        const [imageId, version, baseDigest, policy, builtAt] = r.stdout.trim().split('|');
+        // pinned（ラベル無しの旧イメージを含む）: マニフェストのダイジェストと一致 / latest: 取得時に固定したダイジェスト（sha256）が記録されていること（v0.3、D-46）
+        const latestPolicy = policy === 'latest';
+        const verified = version === SANDBOX_MANIFEST.version && (latestPolicy ? /^sha256:[0-9a-f]{64}$/.test(baseDigest ?? '') : baseDigest === SANDBOX_MANIFEST.baseDigest);
+        if (id === 'docker.image.sandbox') sandboxImageInfo = { policy: latestPolicy ? 'latest' : 'pinned', builtAt: builtAt || null };
+        add({ id, label, status: verified ? 'ok' : 'fail', detail: verified ? `${image} (${(imageId ?? '').slice(0, 19)}) 検証済み: version ${version}, base ${(baseDigest ?? '').slice(0, 19)}${latestPolicy ? `（最新版方針、取得 ${builtAt || '不明'}）` : '（固定版）'}` : `${image} はマニフェストと一致しません（version=${version || '（なし）'}, base=${(baseDigest || '（なし）').slice(0, 19)}）。使用しません`, fix: verified ? null : `${setupFix}。既存のイメージは作り直されます` });
       }
+      // 同梱ツールチェーンの版（イメージ内 /etc/agent-orchestrator/versions.json）と更新の有無（v0.3、D-46）
+      if (sandboxImageInfo) await this.toolchainVersions(add, sandboxImageInfo);
     }
-
     // CLI（ホスト側）。実行はコンテナ内のピン留め版で行うが、ホスト版の存在とフラグ互換をここで確認する
     const claude = await this.version('claude', ['--version']);
     add({ id: 'cli.claude', label: 'Claude Code CLI', status: claude.ok ? 'ok' : 'warn', detail: claude.text, fix: claude.ok ? null : 'ホストに Claude Code が無くても、サンドボックスイメージ内の版で実行します（認証ファイルは必要）' });
@@ -167,6 +183,38 @@ export class LocalEnvironmentAdapter implements EnvironmentAdapter {
 
     const canRun = this.mode !== 'unavailable' && checks.every((c) => c.status === 'ok' || c.status === 'warn');
     return { platform: `${platform()} ${release()}`, executionMode: this.mode, canRun, checks, checkedAt: new Date().toISOString() };
+  }
+
+  /** イメージに記録された版を読み、npm レジストリで最新版を確認する（ホストから読み取りのみ。到達できなければ未確認） */
+  private async toolchainVersions(add: (c: EnvironmentCheck) => void, info: { policy: 'pinned' | 'latest'; builtAt: string | null }): Promise<void> {
+    const r = await this.run({ command: 'docker', args: ['run', '--rm', '--network', 'none', '--entrypoint', 'cat', this.options.config.sandboxImage, '/etc/agent-orchestrator/versions.json'], inheritEnv: true, timeoutMs: 60_000 });
+    let v: Record<string, string | null> | null = null;
+    try {
+      v = r.exitCode === 0 ? (JSON.parse(r.stdout) as Record<string, string | null>) : null;
+    } catch {
+      v = null;
+    }
+    if (!v) {
+      add({ id: 'toolchain.versions', label: '同梱ツールチェーンの版', status: 'unverified', detail: 'イメージに版の記録がありません（v0.3 より前のビルド）。再ビルドすると記録されます', fix: null });
+      return;
+    }
+    const clean = (s: string | null | undefined) => (s ?? '').replace(/^.*?(\d+\.\d+\.\d+).*$/s, '$1') || '不明';
+    const installed = { claudeCode: clean(v['claudeCode']), codex: clean(v['codex']), pnpm: clean(v['pnpm']), uv: clean(v['uv']) };
+    const summary = `Claude Code ${installed.claudeCode} ／ Codex ${installed.codex} ／ pnpm ${installed.pnpm} ／ npm ${clean(v['npm'])} ／ yarn ${clean(v['yarn'])} ／ ${v['python'] ?? 'Python 不明'} ／ uv ${installed.uv}（方針: ${info.policy === 'latest' ? '最新版' : '固定版'}、取得 ${v['builtAt'] ?? info.builtAt ?? '不明'}）`;
+    // 最新版の確認（npm レジストリ。読み取りのみ。失敗は未確認として扱う）
+    const latest: Record<string, string | null> = {};
+    const npm = await this.version('npm', ['--version']); // Windows の .cmd シムを回避した起動形（node <npm-cli.js>）を得る
+    for (const [key, pkg] of [['claudeCode', '@anthropic-ai/claude-code'], ['codex', '@openai/codex'], ['pnpm', 'pnpm']] as const) {
+      const q = npm.ok ? await this.run({ command: npm.command, args: [...npm.prefixArgs, 'view', pkg, 'version'], inheritEnv: true, timeoutMs: 20_000 }) : null;
+      latest[key] = q && q.exitCode === 0 ? q.stdout.trim().split('\n').pop()?.trim() ?? null : null;
+    }
+    const newer = (a: string, b: string | null | undefined) => Boolean(b) && a !== '不明' && compareVersions(b!, a) > 0;
+    const outdated = (['claudeCode', 'codex', 'pnpm'] as const).filter((k) => newer(installed[k], latest[k])).map((k) => `${k === 'claudeCode' ? 'Claude Code' : k === 'codex' ? 'Codex' : 'pnpm'} ${installed[k]} → ${latest[k]}`);
+    const unreachable = Object.values(latest).every((x) => x === null);
+    if (unreachable) add({ id: 'toolchain.versions', label: '同梱ツールチェーンの版', status: 'ok', detail: `${summary}。最新版の確認は未実施（npm レジストリに到達できません）`, fix: null });
+    else if (outdated.length === 0) add({ id: 'toolchain.versions', label: '同梱ツールチェーンの版', status: 'ok', detail: `${summary}。いずれも最新です`, fix: null });
+    else if (info.policy === 'latest') add({ id: 'toolchain.versions', label: '同梱ツールチェーンの版', status: 'warn', detail: `${summary}。更新あり: ${outdated.join('、')}`, fix: 'ホーム画面の「サンドボックスを更新する」で最新版を取り直してください（既存のイメージは置き換わります）' });
+    else add({ id: 'toolchain.versions', label: '同梱ツールチェーンの版', status: 'ok', detail: `${summary}。固定版です。新しい版があります: ${outdated.join('、')}（更新する場合は「サンドボックスを更新する」で最新版を選ぶか、マニフェストの固定版を更新してください）`, fix: null });
   }
 
   /**

@@ -2,6 +2,38 @@
 
 作成日: 2026-11-01（リリース準備フェーズ後に更新）　対象: `docs/SPEC.md` v2.0　受入結果: `docs/ACCEPTANCE_REPORT.md`（**PASS 56 / FAIL 0 / NOT_RUN 0**）
 
+## 0¹³. v0.3 作業（2026-11-02 追記）: Python 対応とサンドボックスの版の方針
+
+### Python プロファイル（D-45）
+
+| 項目 | 内容 |
+|---|---|
+| 背景 | 利用者から「Python プロファイルを追加して他言語にも対応」の要望 |
+| 実装 | `python-uv`（`pyproject.toml` + `uv.lock`、`uv sync --frozen` → `uv run --frozen --no-sync <tool>`）と `python-pip`（`requirements.txt`、`python3 -m venv .venv` → `.venv/bin/python -m pip install -r …` → `.venv/bin/python -m <tool>`）。プロファイルはファイルから判定（`package.json` → Node 優先、`uv.lock`、`requirements.txt`）。検証ツールは依存に宣言されたものだけ（lint: ruff / flake8、test: pytest、typecheck: mypy / pyright、無ければ `python -m compileall`）。`[tool.agent-orchestrator.scripts]` で上書き・生成物 script を定義（値は許可ツール名で始まるもののみ。シェル経由では実行しない）。サンドボックスイメージに Python 3.11（Debian bookworm）/ pip / venv / uv を同梱。uv / pip のキャッシュと `.venv` はワークスペースボリューム内（同期から除外）。既定 allowlist に `pypi.org` / `files.pythonhosted.org` |
+| 事前診断 | lockfile（pip は `==` 固定の有無）、`requires-python` とサンドボックスの 3.11 の整合、検証ツールの有無、index URL と allowlist の整合、sdist ビルド（Node の `--ignore-scripts` 相当の抑止が無いことを「未確認」として明示） |
+| Policy Gate | 新規 `# noqa`（`PG-PY-NOQA`）/ `# type: ignore` `# pyright: ignore`（`PG-PY-TYPE-IGNORE`）/ テストの skip・xfail 追加（`PG-PY-TEST-SKIP`）/ テスト削除（`PG-TEST-DELETED`）/ pyproject・ruff.toml・mypy.ini・pytest.ini・setup.cfg・tox.ini・pyrightconfig.json・.flake8 の緩和（`PG-PY-CONFIG-RELAXED`。ignore / exclude / addopts --deselect / ignore_errors 等は blocking、他は warning）。文字列内の一致は数えない |
+| 安全条件 | Node と同じ: lockfile 固定・任意コマンド不可・隔離 / seccomp / egress / Policy Gate / 完了ゲートは不変。Builder のツール allowlist に uv / python / pytest / ruff / mypy / pyright を追加（任意シェルは不可のまま） |
+| テスト | Vitest **280 passed**（新規 15: プロファイル検出・pyproject / requirements 解釈・requires-python 判定・ツール選択と argv・pip の venv / install・script 上書きの許可判定・Python 診断 4 件・Policy Gate Python 規則 4 件・最新版方針 2 件・版比較）、Playwright 31 passed、tsc / svelte-check / eslint クリーン |
+| 実 CLI（uv） | サンプル `make-sample-repo.mjs --lang python`（pyproject + uv.lock、ruff / pytest、`docs:api` 生成物）。**実行 1: NEEDS_HUMAN**（3 ラウンド、811 秒、Builder $0.19）— 全ラウンドで検証 6/6 合格（`uv sync --frozen` 3 秒 / typecheck / ruff / pytest / `generate:docs:api` / structure）、Policy Gate 0 件、範囲内。原因は Reviewer（Codex）が指示文「You cannot run commands」を読み取りにも適用し、「greet.py と流儀が一致」など既存ファイルとの比較が必要な受入条件を 3 回 unverified にしたこと（ログに読み取りコマンドの試行なし）。指示を「読み取り専用コマンドでファイルを読んでよい。プロジェクトのコードは実行しない」に改め（D-40 補足）、**実行 2: COMPLETED**（1 ラウンド、511 秒、Builder $0.04、Codex approved: 「farewell は greet の注釈と流儀に従う。`__init__.py` は greet を再公開していないので変更不要」と既存ファイルを読んで判定）。元リポジトリ無変更、egress 拒否は Codex のテレメトリ系ホストのみ。task.yaml は `verificationProfile: python-uv` |
+| 実 CLI（pip） | **未検証**（実装・単体テスト済み。`venv` → `pip install -r` → `.venv/bin/python -m <tool>` の argv と readiness を単体テストで固定） |
+| 残課題 | poetry / pdm / pipenv の lockfile と conda は未対応（診断で「実行不可」）。sdist ビルドの抑止は不可。サンドボックスの Python は 3.11 のみ。typecheck 既定は構文チェック（mypy / pyright は依存にあるときのみ） |
+
+### サンドボックスの版の方針（D-46）
+
+| 項目 | 内容 |
+|---|---|
+| 背景 | 利用者から「版は固定だけでなく最新版も選びたい（脆弱性対応のため）」の要望 |
+| 実装 | Dockerfile の版をすべて ARG 化（`NODE_IMAGE` / `PNPM_VERSION` / `CLAUDE_CODE_VERSION` / `CODEX_VERSION` / `UV_VERSION` / `VERSION_POLICY`）。入った版を `/etc/agent-orchestrator/versions.json` に記録。マニフェストに `baseImageLatest`（`node:22-bookworm-slim`）と固定版のツール表を追加。GUI「サンドボックスを準備する / 更新する」に **固定版 / 最新版** のラジオ（`sandbox-policy`）。既にイメージがある場合も環境チェックから「サンドボックスを更新する（再ビルド）」を開ける。最新版でも取得したベースのダイジェストを読み取って `FROM <tag>@<digest>` でビルドし、ラベル（`base-digest` / `version-policy` / `built-at`）に記録。環境チェックはラベルの方針で検証を切り替え、`versions.json` を `--network none` のコンテナで読んで同梱版を表示し、ホストから `npm view` で最新版を確認（最新版方針で新版あり → warn + 更新を促す、固定版 → 情報、到達不可 → 未確認と明示）。開発環境は `pnpm sandbox:build --policy latest` |
+| 実測 | 固定版で再ビルド（この環境は apt 214 秒 + npm install が長く計 25 分超）。記録: node v22.23.4 / pnpm 12.16.1 / npm 10.9.9 / yarn 1.22.22 / Claude Code 2.1.316 / Codex 0.166.0 / Python 3.11.2 / uv 0.13.6。環境チェック: 「同梱ツールチェーンの版 … いずれも最新です」。Windows では `npm` が `.cmd` シムのため既存のシム回避（`node <npm-cli.js>`）を使うよう修正（修正前は「レジストリに到達できません」） |
+| 未検証 | 最新版方針での実ビルド（単体テストで pull 対象・ダイジェスト固定・build-arg・ラベルを検証。Dockerfile の `latest` 分岐は `pip3 install uv` と `npm install -g <pkg>@latest` の既知の形） |
+| 残課題 | 脆弱性データベースとの照合はしない（版の新旧のみ）。最新版で CLI の必須フラグが変わった場合は起動前のフラグ互換チェックで NEEDS_HUMAN。マニフェストの固定版更新はリリースごとに人間が行う |
+
+### 併せて直したもの
+
+- Reviewer（Codex）の指示文を修正（上記、D-40 補足）。npm / pnpm のプロジェクトでも、既存ファイルとの比較が必要な受入条件を含むタスクは同じ理由で NEEDS_HUMAN になり得たため、言語を問わず効く修正。
+- `scripts/diagnosis-audit.mjs` は `apps/runner/dist` を読むため、runner を再ビルドしてから実行する（古い dist で Python サンプルが「lockfile なし」と誤判定された）。
+- 承認画面の生成物の実行コマンド表示に Python の接頭辞（`uv run` / `.venv/bin/python -m`）を追加。
+
 ## 0¹². v0.3 作業（2026-11-02 追記）: パッケージマネージャ対応と UI 磨き込み
 
 ### パッケージマネージャ対応（D-44）

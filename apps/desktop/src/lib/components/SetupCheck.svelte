@@ -12,7 +12,7 @@
     busy: boolean;
     onRecheck: () => void;
     setup?: SandboxSetupState | null;
-    onSandboxStart?: () => void;
+    onSandboxStart?: (policy: 'pinned' | 'latest') => void;
     onSandboxCancel?: () => void;
     /** 右のレール用: 状態 1 行 + 折りたたみの項目一覧（問題がある項目だけ常時表示） */
     compact?: boolean;
@@ -55,7 +55,12 @@
       </Alert>
     {/if}
     {#if (imagesMissing && !dockerFailing) || (setup && setup.state !== 'idle')}
-      <SandboxSetup {setup} {busy} onStart={() => onSandboxStart?.()} onCancel={() => onSandboxCancel?.()} />
+      <SandboxSetup {setup} {busy} onStart={(p) => onSandboxStart?.(p)} onCancel={() => onSandboxCancel?.()} />
+    {:else if compact && report.canRun && onSandboxStart}
+      <details class="section" data-testid="sandbox-update">
+        <summary>サンドボックスを更新する（再ビルド）</summary>
+        <SandboxSetup {setup} {busy} update onStart={(p) => onSandboxStart?.(p)} onCancel={() => onSandboxCancel?.()} />
+      </details>
     {/if}
 
     {#if compact}

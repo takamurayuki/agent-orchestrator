@@ -143,9 +143,9 @@ export class DraftService {
     const parsed = parseAndValidateTaskYaml(rev.taskYaml);
     if (!parsed.ok) throw new DraftServiceError('VALIDATION_FAILED', `task.yaml が契約に適合しません: ${parsed.errors.join('; ')}`);
     if ((parsed.task.generatedArtifacts ?? []).length > 0) {
-      const scripts = (await this.context(draft)).digest.packageJson?.scripts ?? {};
+      const scripts = (await this.context(draft)).digest.projectScripts ?? {};
       const missing = (parsed.task.generatedArtifacts ?? []).filter((g) => typeof scripts[g.script] !== 'string');
-      if (missing.length > 0) throw new DraftServiceError('VALIDATION_FAILED', `生成スクリプトが package.json にありません: ${missing.map((g) => `${g.script}（${g.path}）`).join(', ')}。承認前に生成手段を確定してください`);
+      if (missing.length > 0) throw new DraftServiceError('VALIDATION_FAILED', `生成スクリプトがプロジェクトの scripts（package.json / pyproject の [tool.agent-orchestrator.scripts]）にありません: ${missing.map((g) => `${g.script}（${g.path}）`).join(', ')}。承認前に生成手段を確定してください`);
     }
     const project = this.deps.repo.getProject(draft.projectId);
     const readiness = checkProfileReadiness(project?.path ?? parsed.task.repository, parsed.task.verificationProfile);
@@ -259,7 +259,7 @@ export class DraftService {
       return this.view(draft);
     }
     // 生成物（v0.2.1、D-41）: GEN- 質問への判断を素案に適用し、生成手段が不明なものは推測せず承認前に尋ねる
-    const scriptsMap = Object.fromEntries(Object.entries(ctx.digest.packageJson?.scripts ?? {}).filter(([, v]) => typeof v === 'string')) as Record<string, string>;
+    const scriptsMap: Record<string, string> = { ...(ctx.digest.projectScripts ?? {}) };
     const activeGen = activeDecisions(this.deps.repo.listDecisions(draft.id));
     // 入力の分類（v0.2.2、D-42）を付けてから判断を適用する（script の差し替え → 対象外 / 入力なしで続行）
     const validated = { ok: true as const, value: applyGenerationDecisions(attachGeneratorInputs(applyGenerationDecisions(validatedRaw.value, activeGen), ctx.digest.generators ?? {}), activeGen) };

@@ -42,9 +42,9 @@ export async function refreshSandboxStatus(): Promise<void> {
 }
 
 /** GUI からサンドボックス（Docker イメージ）を準備する。ユーザーの明示的な同意（チェックボックス）の後だけ呼ぶ。 */
-export async function startSandboxSetup(): Promise<void> {
+export async function startSandboxSetup(versionPolicy: 'pinned' | 'latest' = 'pinned'): Promise<void> {
   const transport = getTransport();
-  const state = await guarded('サンドボックス準備', () => transport.call('sandbox.setup', { acknowledgePull: true }));
+  const state = await guarded('サンドボックス準備', () => transport.call('sandbox.setup', { acknowledgePull: true, versionPolicy }));
   if (state) {
     app.sandboxSetup = state;
     app.announce('サンドボックスの準備を開始しました。ベースイメージの取得とビルドには数分かかります');

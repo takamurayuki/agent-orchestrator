@@ -90,9 +90,9 @@ export interface GeneratorAnalysis extends GeneratorPaths {
   inputs: GeneratedInput[];
 }
 
-const READ_FNS = new Set(['readFileSync', 'readdirSync', 'existsSync', 'statSync', 'lstatSync', 'readFile', 'readdir', 'createReadStream', 'stat', 'access', 'accessSync', 'opendirSync']);
-const WRITE_FNS = new Set(['writeFileSync', 'writeFile', 'mkdirSync', 'mkdir', 'appendFileSync', 'appendFile', 'copyFileSync', 'rmSync', 'unlinkSync', 'createWriteStream']);
-const FS_CALL = /\b(readFileSync|readdirSync|existsSync|statSync|lstatSync|readFile|readdir|createReadStream|stat|access|accessSync|opendirSync|writeFileSync|writeFile|mkdirSync|mkdir|appendFileSync|appendFile|copyFileSync|rmSync|unlinkSync|createWriteStream)\(\s*((?:[^,()]|\([^()]*\))*)/g;
+const READ_FNS = new Set(['readFileSync', 'readdirSync', 'existsSync', 'statSync', 'lstatSync', 'readFile', 'readdir', 'createReadStream', 'stat', 'access', 'accessSync', 'opendirSync', 'open', 'listdir', 'read_text', 'glob', 'iterdir']);
+const WRITE_FNS = new Set(['writeFileSync', 'writeFile', 'mkdirSync', 'mkdir', 'appendFileSync', 'appendFile', 'copyFileSync', 'rmSync', 'unlinkSync', 'createWriteStream', 'write_text']);
+const FS_CALL = /\b(readFileSync|readdirSync|existsSync|statSync|lstatSync|readFile|readdir|createReadStream|stat|access|accessSync|opendirSync|writeFileSync|writeFile|mkdirSync|mkdir|appendFileSync|appendFile|copyFileSync|rmSync|unlinkSync|createWriteStream|open|listdir|read_text|write_text|glob|iterdir)\(\s*((?:[^,()]|\([^()]*\))*)/g;
 const ASSIGN = /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*([^;\n]+)/g;
 
 function normalizePath(p: string): string | null {

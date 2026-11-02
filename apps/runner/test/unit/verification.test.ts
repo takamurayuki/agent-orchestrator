@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { checkProfileReadiness, detectProfileFromFiles, expectedCommandNames, getProfile, runScriptArgv } from '../../src/verification/profiles.js';
+import { checkProfileReadiness, commandsFor, detectProfileFromFiles, expectedCommandNames, runScriptArgv } from '../../src/verification/profiles.js';
 import { INSTALL_TIMEOUT_FLOOR_MS, SandboxVerifier } from '../../src/verification/runner.js';
 import { FakeSandbox } from '../helpers/fake-sandbox.js';
 
@@ -44,8 +44,8 @@ describe('verification profile readiness (SPEC §7)', () => {
     expect(detectProfileFromFiles(['package.json', 'yarn.lock'])).toBe('node-yarn');
     expect(detectProfileFromFiles(['package.json', 'pnpm-lock.yaml', 'yarn.lock'])).toBe('node-pnpm');
     expect(detectProfileFromFiles(['package.json', 'bun.lock'])).toBeNull();
-    expect(getProfile('node-npm').commands[0]!.argv).toEqual(['npm', 'ci', '--ignore-scripts', '--no-audit', '--no-fund']);
-    expect(getProfile('node-yarn').commands[0]!.argv).toEqual(['yarn', 'install', '--frozen-lockfile', '--ignore-scripts', '--non-interactive']);
+    expect(commandsFor('node-npm', dir)[0]!.argv).toEqual(['npm', 'ci', '--ignore-scripts', '--no-audit', '--no-fund']);
+    expect(commandsFor('node-yarn', dir)[0]!.argv).toEqual(['yarn', 'install', '--frozen-lockfile', '--ignore-scripts', '--non-interactive']);
     expect(runScriptArgv('node-npm', 'typecheck')).toEqual(['npm', 'run', 'typecheck']);
     expect(runScriptArgv('node-yarn', 'test:run')).toEqual(['yarn', 'run', 'test:run']);
     const scripts = { typecheck: 'tsc', lint: 'eslint .', 'test:run': 'vitest run' };

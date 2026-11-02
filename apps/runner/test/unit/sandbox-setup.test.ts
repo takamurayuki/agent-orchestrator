@@ -27,6 +27,11 @@ function scripted(opts: { baseDigest?: string; failBuild?: string; labels?: stri
       return result({});
     }
     if (sub === 'image' && req.args[1] === 'inspect' && req.args[3]?.includes('RepoDigests')) return result({ stdout: `["node@${opts.baseDigest ?? SANDBOX_MANIFEST.baseDigest}"]\n` });
+    if (sub === 'image' && req.args[1] === 'inspect' && req.args[3]?.includes('Labels') && opts.labels === 'echo-build') {
+      const build = calls.find((c) => c[0] === 'build')!;
+      const label = (k: string) => build.find((x) => x.startsWith(`${k}=`))!.slice(k.length + 1);
+      return result({ stdout: `${label(SANDBOX_MANIFEST.labels.version)}|${label(SANDBOX_MANIFEST.labels.baseDigest)}\n` });
+    }
     if (sub === 'build') {
       const tag = req.args[req.args.indexOf('-t') + 1]!;
       req.onStdout?.(`#1 [internal] load build definition\nSECRET=sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ-abcdefghijklmnopqrstAA\n`);
@@ -155,5 +160,41 @@ describe('SandboxSetupService (GUI-driven image setup, D-36)', () => {
     svc.start({ acknowledgePull: true });
     expect(() => svc.start({ acknowledgePull: true })).toThrow(/既に実行中/);
     await settle(svc);
+  });
+
+  it('v0.3 (D-46): latest policy pulls the floating tag, pins the build to the digest it got, and labels the policy', async () => {
+    const got = `sha256:${'b'.repeat(64)}`;
+    const runner = scripted({ baseDigest: got, labels: 'echo-build' });
+    const svc = service(runner);
+    svc.start({ acknowledgePull: true, versionPolicy: 'latest' });
+    const final = await settle(svc);
+    expect(final.state).toBe('succeeded');
+    expect(runner.calls[1]).toEqual(['pull', SANDBOX_MANIFEST.baseImageLatest]);
+    const builds = runner.calls.filter((c) => c[0] === 'build');
+    expect(builds).toHaveLength(2);
+    for (const b of builds) {
+      expect(b).toContain(`NODE_IMAGE=${SANDBOX_MANIFEST.baseImageLatest}@${got}`);
+      expect(b).toContain('VERSION_POLICY=latest');
+      expect(b).toContain('CLAUDE_CODE_VERSION=latest');
+      expect(b).toContain('CODEX_VERSION=latest');
+      expect(b).toContain(`${SANDBOX_MANIFEST.labels.baseDigest}=${got}`);
+      expect(b).toContain(`${SANDBOX_MANIFEST.labels.versionPolicy}=latest`);
+      expect(b.some((a) => a.startsWith(`${SANDBOX_MANIFEST.labels.builtAt}=20`))).toBe(true);
+    }
+    expect(final.steps.find((s) => s.id === 'base.verify')?.detail).toContain(got);
+  });
+
+  it('v0.3 (D-46): pinned policy (default) keeps the manifest digest check and never passes latest build args', async () => {
+    const runner = scripted({ labels: 'echo-build' });
+    const svc = service(runner);
+    svc.start({ acknowledgePull: true, versionPolicy: 'pinned' });
+    const final = await settle(svc);
+    expect(final.state).toBe('succeeded');
+    for (const b of runner.calls.filter((c) => c[0] === 'build')) {
+      expect(b).toContain('VERSION_POLICY=pinned');
+      expect(b.some((a) => a.includes('=latest'))).toBe(false);
+      expect(b).toContain(`${SANDBOX_MANIFEST.labels.versionPolicy}=pinned`);
+    }
+    expect(() => service(scripted()).start({ acknowledgePull: true, versionPolicy: 'nightly' as unknown as 'pinned' })).toThrow(/versionPolicy/);
   });
 });

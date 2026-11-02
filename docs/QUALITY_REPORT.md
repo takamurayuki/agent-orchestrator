@@ -2,22 +2,22 @@
 
 # 品質評価レポート（ドッグフーディング）
 
-生成: 2026-11-02T06:23:54.856Z 対象: 38 件（test-results/dogfood/*.json）
+生成: 2026-11-02T08:28:40.028Z 対象: 40 件（test-results/dogfood/*.json）
 
 ## 指標
 
 | 指標 | 値 |
 |---|---|
-| タスク数（Run 開始まで到達 / 全体） | 36 / 38 |
-| タスク完了率（COMPLETED / Run 開始） | 22/36 = 61% |
-| 内訳 | COMPLETED 22、NEEDS_HUMAN 9、PRECHECK_FAILED 5、INTERNAL_ERROR 0、承認前停止 2 |
-| 1 タスク当たりの実行時間（ヒアリング+Run、平均） | 354s（ヒアリング 97s、Run 277s） |
-| 平均修正ラウンド数（Run 開始分） | 1.36 |
-| Builder 1 回あたり平均時間 | 44s（49 回） |
-| Reviewer 1 回あたり平均時間 | 26s（41 回） |
-| unknown 発生率（レビュー） | 2/41 |
-| AI 利用量（Builder の報告費用） | $4.211（報告あり 49 回） |
-| egress 拒否（allowlist 外） | 328 件 ／ 許可 6968 件 ／ エラー 13 件 |
+| タスク数（Run 開始まで到達 / 全体） | 38 / 40 |
+| タスク完了率（COMPLETED / Run 開始） | 23/38 = 61% |
+| 内訳 | COMPLETED 23、NEEDS_HUMAN 10、PRECHECK_FAILED 5、INTERNAL_ERROR 0、承認前停止 2 |
+| 1 タスク当たりの実行時間（ヒアリング+Run、平均） | 369s（ヒアリング 101s、Run 289s） |
+| 平均修正ラウンド数（Run 開始分） | 1.39 |
+| Builder 1 回あたり平均時間 | 44s（53 回） |
+| Reviewer 1 回あたり平均時間 | 30s（45 回） |
+| unknown 発生率（レビュー） | 2/45 |
+| AI 利用量（Builder の報告費用） | $4.435（報告あり 53 回） |
+| egress 拒否（allowlist 外） | 362 件 ／ 許可 7079 件 ／ エラー 13 件 |
 | 元リポジトリ不変 | 全件 |
 
 
@@ -29,7 +29,7 @@
 | v0.2.0（改善後） | 5 | 3/5 = 60% | 0 | 2 | 0 | 298s | 1.40 | $0.64 / $0.07 | 3/7 | 1 |
 | v0.2.1（安定化） | 3 | 2/3 = 67% | 0 | 1 | 0 | 314s | 2.00 | $0.48 / $0.07 | 2/4 | 0 |
 | v0.2.2（最終安定化・実 CLI 検証 TEST-01〜05） | 5 | 4/5 = 80% | 0 | 1 | 0 | 610s | 1.60 | $0.52 / $0.09 | 2/6 | 0 |
-| v0.3（npm / yarn 対応の実 CLI 検証） | 4 | 1/4 = 25% | 2 | 0 | 1 | 602s | 0.33 | $0.13 / $0.13 | 0/1 | 0 |
+| v0.3（npm / yarn 対応の実 CLI 検証） | 6 | 2/6 = 33% | 2 | 1 | 1 | 621s | 1.00 | $0.36 / $0.09 | 3/5 | 0 |
 ## タスク別
 
 | タスク | 状態 | 理由 | ラウンド | 時間 | 変更ファイル | 未解決指摘 | 人間レビュー |
@@ -67,6 +67,8 @@
 | v03-sample-yarn-farewell | PRECHECK_FAILED | ベースライン検証（変更前のリポジトリ）が失敗: install, typecheck(未実行), lint(未実行), test:run(未実行)。install が制限時間内に終わりませんでした。プロジェクトの検証コマンドの所要時間を確認 | 0 | 732s | 0 | 0 | changes_requested: v0.3 yarn 1 対応: node-yarn が選ばれ task.yaml に固定されたが、起動前検査の yarn install が registry.yarnpkg.com からの取得で 10 分以内に完了せず PRECHECK_FAILED（AI は未実行、プロジェクト不変）。egress は許可のみで拒否なし、接続切れ 4 件。 |
 | v03b-sample-npm-farewell | COMPLETED | round 1: すべての完了ゲートを通過 | 1 | 736s | 3 | 0 | approved: v0.3 npm 対応（修正後）: package-lock.json から node-npm を選び、task.yaml に固定。素案が docs/API.md（docs:api）を識別、Run は 1 ラウンドで COMPLETED（736 秒、$0.13）。検証は npm ci --ignore-scripts（14 秒）/ typecheck / lint / test:run / generate:docs:api（npm run）/ structure、Codex approved。 |
 | v03b-sample-yarn-farewell | PRECHECK_FAILED | ベースライン検証（変更前のリポジトリ）が失敗: install, typecheck(未実行), lint(未実行), test:run(未実行)。install が制限時間内に終わりませんでした。プロジェクトの検証コマンドの所要時間を確認 | 0 | 802s | 0 | 0 | changes_requested: v0.3 yarn 1 対応（--registry npmjs を試行）: Yarn 1 は lockfile の resolved URL（yarnpkg）から取得するため効果なく、同じく install が 10 分で完了せず PRECHECK_FAILED。ホスト側でも yarn 1 の fetch は 150 秒以上かかり、curl 単体では 1.3 秒のため yarn 1 の取得方式とこの環境の相性と判断。別環境での再検証が必要。 |
+| v03c-sample-py-farewell-2 | COMPLETED | round 1: すべての完了ゲートを通過 | 1 | 511s | 3 | 0 | 未 |
+| v03c-sample-py-farewell | NEEDS_HUMAN | round 3: レビュー changes_requested、修正上限に到達 | 3 | 811s | 3 | 0 | 未 |
 | v21-conflict-gate-2 | COMPLETED | round 1: すべての完了ゲートを通過 | 1 | 244s | 2 | 0 | approved: v2.1 実機検証 2 回目（修正後）。ヒアリングの選択肢順が concat / exception / disable_rule となり（規則緩和は非推奨と明示）、文字列連結で実装。eslint-disable なし、Policy Gate 0 件、lint 通過、Codex approved。人間レビューも approved。矛盾はヒアリング段階で解消されたため矛盾検出ステップの差し戻しは発生せず（通常質問として回答履歴に残る。意思決定ログには CONTRA- 質問のみ記録される点は改善候補）。 |
 | v21-conflict-gate | COMPLETED | round 1: すべての完了ゲートを通過 | 1 | 194s | 2 | 0 | rejected: v2.1 実機検証 1 回目。ヒアリングで矛盾は質問されたが（自動回答が先頭の disable_line を選択）、Builder が行末コメント `// eslint-disable-line no-restricted-syntax` で規則を回避し、初版 Policy Gate（scanner 実装）が取り逃がして COMPLETED。人間レビューでは不合格（規則の局所無効化）。→ パーサ駆動のコメント収集に修正し、監査で同ワークスペースの検出を確認。 |
 | v22-policy-loop-2 | NEEDS_HUMAN | round 3: Policy Gate の未承認違反 1 件（PG-ESLINT-DISABLE）、修正上限に到達 | 3 | 304s | 2 | 2 | needs_human: ヒアリングで eslint_disable → register_exception（「後で登録する」）を選択し、要件が「console.log と理由付き eslint-disable-next-line を必須」になった。Round 1: Builder が eslint-disable-next-line no-console を追加 → Policy Gate が PG-ESLINT-DISABLE で差し戻し（POLICY_BLOCKED）。Round 2: フィードバック（feedback.json に違反と修正指示）を受けて process.stdout.write に修正、検証 3/3 PASS、Codex は「要件が console.log と抑制コメントを明示しているのに逸脱」として changes_requested（指摘は要件に照らして妥当）。Round 3: Builder が再び eslint-disable を追加 → 差し戻し → 上限で NEEDS_HUMAN / POLICY_VIOLATION。要件と Policy Gate が真正面から矛盾しており、人間が例外登録か要件変更を決めるべき状況。ツールの判断は妥当。Policy Gate の差し戻しループと指摘の受け渡しは実測できた。 |

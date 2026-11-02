@@ -1,4 +1,5 @@
 import type { ProjectDiagnosis, ProjectDiagnosisCheck } from '@agent-orchestrator/contracts';
+import { diagnosePythonProject } from './diagnosis-python.js';
 import { SANDBOX_FILES, SANDBOX_MANIFEST } from '../sandbox/assets.generated.js';
 
 /**
@@ -14,6 +15,8 @@ export interface DiagnosisInput {
   packageManager: string | null;
   /** lockfile から決めた検証プロファイル（未対応・lockfile 無しは null） */
   verificationProfile?: string | null;
+  /** Python 診断がファイルを読むためのリポジトリパス（省略時は Python 項目を出さない） */
+  repoPath?: string;
   verificationReady: boolean;
   verificationDetail: string;
   isClean: boolean | null;
@@ -115,6 +118,15 @@ export function diagnoseProject(input: DiagnosisInput): ProjectDiagnosis {
   const pkg = parseJson<PackageJson>(input.readText('package.json'));
   const allow = new Set(input.egressAllowlist.map((h) => h.toLowerCase()));
 
+  // Python プロジェクト（v0.3、D-45）: lockfile / Python 版 / 検証ツール / index / sdist を別モジュールで診断し、共通項目（検証プロファイル・作業ツリー）だけ共有する
+  if ((input.verificationProfile === 'python-uv' || input.verificationProfile === 'python-pip') && input.repoPath) {
+    for (const c of diagnosePythonProject({ repoPath: input.repoPath, files: input.files, readText: input.readText, packageManager: input.verificationProfile === 'python-uv' ? 'uv' : 'pip', egressAllowlist: input.egressAllowlist })) add(c);
+    add({ id: 'verification', label: `検証プロファイル ${input.verificationProfile}`, status: input.verificationReady ? 'ok' : 'fail', detail: input.verificationDetail, fix: input.verificationReady ? null : '依存に ruff と pytest を追加するか、pyproject.toml の [tool.agent-orchestrator.scripts] に lint / test:run を定義してください' });
+    if (input.isClean === false) add({ id: 'worktree', label: '作業ツリー', status: 'fail', detail: '未コミットの変更があります（ベース SHA を固定できません）', fix: '実行前に commit または stash してください' });
+    const v: ProjectDiagnosis['verdict'] = checks.some((c) => c.status === 'fail') ? 'blocked' : checks.some((c) => c.status === 'warn') ? 'issues' : checks.some((c) => c.status === 'unverified') ? 'unverified' : 'ready';
+    return { verdict: v, checks };
+  }
+
   // 1. パッケージマネージャと lockfile（pnpm / npm / yarn 1 に対応。v0.3、D-44）
   const pmDetected = input.packageManager;
   if (pmDetected === 'pnpm' && input.files.includes('pnpm-lock.yaml')) {
@@ -134,9 +146,9 @@ export function diagnoseProject(input: DiagnosisInput): ProjectDiagnosis {
     if (classic) add({ id: 'lockfile', label: 'lockfile', status: 'ok', detail: 'yarn.lock（Yarn 1 形式）。yarn install --frozen-lockfile --ignore-scripts で復元します', fix: null });
     else add({ id: 'lockfile', label: 'lockfile', status: 'fail', detail: 'yarn.lock が Yarn 2+（Berry）形式です。サンドボックスは Yarn 1（classic）のみ同梱しており、Berry は未対応です', fix: 'Yarn 1 に戻すか、npm / pnpm の lockfile に移行してください（対応予定: Berry は corepack と yarnpkg への通信許可が必要）' });
   } else if (pmDetected) {
-    add({ id: 'lockfile', label: 'パッケージマネージャ', status: 'fail', detail: `${pmDetected} の lockfile を検出。サンドボックスで対応しているのは pnpm / npm / yarn 1 です`, fix: 'pnpm / npm / yarn 1 のいずれかに移行して lockfile をコミットしてください' });
+    add({ id: 'lockfile', label: 'パッケージマネージャ', status: 'fail', detail: `${pmDetected} の lockfile を検出。サンドボックスで対応しているのは pnpm / npm / yarn 1 / uv / pip（requirements.txt）です`, fix: 'pnpm / npm / yarn 1（Node）または uv / pip（Python）のいずれかに移行して lockfile をコミットしてください' });
   } else {
-    add({ id: 'lockfile', label: 'lockfile', status: 'fail', detail: 'lockfile（pnpm-lock.yaml / package-lock.json / yarn.lock）が見つかりません', fix: 'プロジェクト側で install を実行して lockfile をコミットしてください' });
+    add({ id: 'lockfile', label: 'lockfile', status: 'fail', detail: 'lockfile（pnpm-lock.yaml / package-lock.json / yarn.lock / uv.lock / requirements.txt）が見つかりません', fix: 'プロジェクト側で install / lock を実行して lockfile をコミットしてください' });
   }
 
   // 2. Node / pnpm のバージョン

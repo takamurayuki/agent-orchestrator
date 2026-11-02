@@ -3,7 +3,7 @@ import { z } from 'zod';
 export const SEVERITIES = ['critical', 'high', 'medium', 'low'] as const;
 export type Severity = (typeof SEVERITIES)[number];
 
-export const VERIFICATION_PROFILES = ['node-pnpm', 'node-npm', 'node-yarn'] as const;
+export const VERIFICATION_PROFILES = ['node-pnpm', 'node-npm', 'node-yarn', 'python-uv', 'python-pip'] as const;
 export type VerificationProfileName = (typeof VERIFICATION_PROFILES)[number];
 
 export const AcceptanceCriterionSchema = z.strictObject({

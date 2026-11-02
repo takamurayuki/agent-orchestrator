@@ -39,7 +39,10 @@ export const DEFAULT_EGRESS_ALLOWLIST = [
   'auth.openai.com',
   'registry.npmjs.org',
   // Yarn 1 の lockfile は registry.yarnpkg.com（npm レジストリのミラー）を参照する（v0.3、D-44）
-  'registry.yarnpkg.com'
+  'registry.yarnpkg.com',
+  // Python（uv / pip）の既定インデックスと配布ファイル（v0.3、D-45）
+  'pypi.org',
+  'files.pythonhosted.org'
 ];
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): RunnerConfig {

@@ -41,7 +41,7 @@
   </header>
 
   {#if app.environment && !app.environment.canRun}
-    <SetupCheck report={app.environment} error={app.environmentError} busy={app.busy !== null} onRecheck={() => void checkEnvironment()} setup={app.sandboxSetup} onSandboxStart={() => void startSandboxSetup()} onSandboxCancel={() => void cancelSandboxSetup()} />
+    <SetupCheck report={app.environment} error={app.environmentError} busy={app.busy !== null} onRecheck={() => void checkEnvironment()} setup={app.sandboxSetup} onSandboxStart={(p) => void startSandboxSetup(p)} onSandboxCancel={() => void cancelSandboxSetup()} />
   {:else if app.sandboxSetup?.state === 'succeeded' && app.environment?.canRun}
     <Alert tone="success" role="status" title="サンドボックスの準備が完了しました" message="実行環境が整いました。プロジェクトを選んで依頼を入力してください。" testid="sandbox-success" />
   {:else if app.environmentError}
@@ -196,7 +196,7 @@
 
     <aside class="stack">
       {#if app.environment?.canRun}
-        <SetupCheck report={app.environment} error={null} busy={app.busy !== null} onRecheck={() => void checkEnvironment()} compact />
+        <SetupCheck report={app.environment} error={null} busy={app.busy !== null} onRecheck={() => void checkEnvironment()} setup={app.sandboxSetup} onSandboxStart={(p) => void startSandboxSetup(p)} onSandboxCancel={() => void cancelSandboxSetup()} compact />
       {/if}
       <section class="card quiet" aria-labelledby="history-heading">
         <h2 id="history-heading">最近の履歴</h2>

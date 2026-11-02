@@ -33,6 +33,8 @@ export interface GeneratedVerifyInput {
   artifacts: readonly GeneratedArtifact[];
   /** 検証プロファイル（script の実行コマンドを決める）。省略時は node-pnpm */
   profile?: VerificationProfileName;
+  /** Python: pyproject の [tool.agent-orchestrator.scripts]（script 名 → 許可ツールで始まるコマンド）。Node は不要 */
+  projectScripts?: Record<string, string>;
   env: Record<string, string>;
   timeoutMs: number;
   signal: AbortSignal;
@@ -44,10 +46,15 @@ export async function verifyGeneratedArtifacts(sandbox: SandboxExecutor, input: 
   for (const a of input.artifacts) {
     const started = Date.now();
     const name = `generate:${a.script}`;
-    const argv = runScriptArgv(input.profile ?? 'node-pnpm', a.script);
+    const resolved = runScriptArgv(input.profile ?? 'node-pnpm', a.script, input.projectScripts);
+    const argv = resolved ?? [a.script];
     const fail = (detail: string, exitCode: number | null = 1, timedOut = false): VerificationCommandResult => ({ name, argv, exitCode, timedOut, durationMs: Date.now() - started, stdoutExcerpt: excerpt(detail, 6000), stderrExcerpt: '', truncated: false });
     if (!SCRIPT_NAME_RE.test(a.script) || a.path.includes('..') || a.path.startsWith('/')) {
       results.push(fail(`生成スクリプト名または生成物パスが不正です: ${a.script} / ${a.path}`));
+      continue;
+    }
+    if (!resolved) {
+      results.push(fail(`生成スクリプト ${a.script} の定義がありません（Python は pyproject.toml の [tool.agent-orchestrator.scripts] に、許可されたツールで始まるコマンドとして定義してください）`));
       continue;
     }
     const hash = async (label: string) => {

@@ -38,7 +38,7 @@ export interface IpcParams {
   'run.status': { runId: string; sinceSequence?: number };
   'run.list': { limit?: number };
   'run.report': { runId: string };
-  'sandbox.setup': { acknowledgePull: true };
+  'sandbox.setup': { acknowledgePull: true; versionPolicy?: 'pinned' | 'latest' };
   'sandbox.cancel': Record<string, never>;
   'sandbox.status': Record<string, never>;
 }

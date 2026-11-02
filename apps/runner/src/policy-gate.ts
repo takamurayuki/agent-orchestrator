@@ -1,5 +1,6 @@
 import ts from 'typescript';
 import type { DiffFile, PolicyFinding } from '@agent-orchestrator/contracts';
+import { PY_CONFIG_RE, PY_FILE_RE, PY_TEST_FILE_RE, collectPythonSuppressions, collectPythonTestSkips, pythonConfigChanges } from './policy-gate-python.js';
 
 /**
  * Policy Gate（v2.1、SPEC §7 / §9 の差分ポリシーを拡張）。AI レビューとは独立した静的チェック。純粋関数。
@@ -21,7 +22,7 @@ import type { DiffFile, PolicyFinding } from '@agent-orchestrator/contracts';
  *     （AI は現在の Run の間に例外を増やせない）
  */
 
-export const POLICY_RULE_IDS = ['PG-ESLINT-DISABLE', 'PG-TS-SUPPRESS', 'PG-TEST-SKIP', 'PG-TEST-DELETED', 'PG-VERIFY-SCRIPT', 'PG-TSCONFIG-RELAXED', 'PG-ESLINT-RELAXED', 'PG-TESTCONFIG-RELAXED', 'PG-UNPARSEABLE', 'PG-ANALYSIS-ERROR'] as const;
+export const POLICY_RULE_IDS = ['PG-ESLINT-DISABLE', 'PG-TS-SUPPRESS', 'PG-TEST-SKIP', 'PG-TEST-DELETED', 'PG-VERIFY-SCRIPT', 'PG-TSCONFIG-RELAXED', 'PG-ESLINT-RELAXED', 'PG-TESTCONFIG-RELAXED', 'PG-UNPARSEABLE', 'PG-ANALYSIS-ERROR', 'PG-PY-NOQA', 'PG-PY-TYPE-IGNORE', 'PG-PY-TEST-SKIP', 'PG-PY-CONFIG-RELAXED'] as const;
 export type PolicyRuleId = (typeof POLICY_RULE_IDS)[number];
 
 export interface PolicyException {
@@ -419,7 +420,7 @@ export function evaluatePolicyGate(input: PolicyGateInput): PolicyGateResult {
     const before = input.baseContents[f.path] ?? null;
     const after = f.status === 'deleted' ? null : (input.currentContents[f.path] ?? null);
 
-    if (f.status === 'deleted' && TEST_FILE_RE.test(path)) {
+    if (f.status === 'deleted' && (TEST_FILE_RE.test(path) || PY_TEST_FILE_RE.test(path))) {
       add('PG-TEST-DELETED', f.path, 1, `deleted (${f.deletions} lines)`, 'テストファイルが削除された');
       continue;
     }
@@ -427,7 +428,22 @@ export function evaluatePolicyGate(input: PolicyGateInput): PolicyGateResult {
 
     // 検出器自身の例外・解析不能は成功として扱わない（fail-closed）
     try {
-      if (CODE_FILE_RE.test(path) && !PACKAGE_JSON_RE.test(path)) {
+      if (PY_FILE_RE.test(path)) {
+        // Python（v0.3、D-45）: 行単位の保守的な検出
+        const bHits = before ? collectPythonSuppressions(before) : [];
+        const aHits = collectPythonSuppressions(after);
+        for (const h of newItems(bHits, aHits, (x) => `${x.kind}:${x.text}`)) {
+          if (h.kind === 'noqa') add('PG-PY-NOQA', f.path, h.line, h.text, '新規の # noqa。lint の指摘を抑制せずコードを規約に合わせること');
+          else add('PG-PY-TYPE-IGNORE', f.path, h.line, h.text, '新規の # type: ignore / # pyright: ignore。型エラーを抑制せず修正すること');
+        }
+        if (PY_TEST_FILE_RE.test(path)) {
+          const bSkips = before ? collectPythonTestSkips(before) : [];
+          const aSkips = collectPythonTestSkips(after);
+          for (const sk of newItems(bSkips, aSkips, (x) => x.text)) add('PG-PY-TEST-SKIP', f.path, sk.line, sk.text, 'テストの skip / xfail の追加');
+        }
+      } else if (PY_CONFIG_RE.test(path)) {
+        for (const h of pythonConfigChanges(path, before, after)) add('PG-PY-CONFIG-RELAXED', f.path, h.line, h.text, h.severity === 'blocking' ? '検証ツール設定の緩和（ignore / exclude / deselect 等）' : '検証ツール設定の変更（内容を確認）', h.severity);
+      } else if (CODE_FILE_RE.test(path) && !PACKAGE_JSON_RE.test(path)) {
         const errors = syntaxErrors(path, after);
         if (errors.length > 0) add('PG-UNPARSEABLE', f.path, Number(errors[0]?.split(':')[0]) || 1, errors.join(' | '), '構文エラーのため静的ポリシーを確定できない（判定不能）。コードを構文的に正しくすること');
         // コメント系（移動は検出しないよう内容の多重集合で比較）。構文エラーがあっても可能な範囲で解析する

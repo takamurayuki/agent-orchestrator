@@ -9,7 +9,14 @@
   const p = $derived(draft.proposal);
   const activeDecisions = $derived(draft.decisions.filter((d) => d.status === 'active'));
   const generatedMissing = $derived(p ? p.generatedArtifacts.filter((g) => g.inputStatus === 'missing').length : 0);
-  const runCmd = $derived(draft.verificationReadiness?.profile === 'node-npm' ? 'npm run' : draft.verificationReadiness?.profile === 'node-yarn' ? 'yarn run' : 'pnpm run');
+  const runCmd = $derived.by(() => {
+    const p = draft.verificationReadiness?.profile;
+    if (p === 'node-npm') return 'npm run';
+    if (p === 'node-yarn') return 'yarn run';
+    if (p === 'python-uv') return 'uv run';
+    if (p === 'python-pip') return '.venv/bin/python -m';
+    return 'pnpm run';
+  });
 </script>
 
 {#if p}

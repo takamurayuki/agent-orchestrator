@@ -111,7 +111,7 @@ export function registerHandlers(server: IpcServer, rt: ReturnType<typeof create
   });
   server.register('run.list', async (p) => ({ runs: rt.runs.list((p as { limit?: number }).limit ?? 50) }));
   server.register('run.report', async (p) => rt.runs.report((p as { runId: string }).runId));
-  server.register('sandbox.setup', async (p) => rt.sandboxSetup.start(p as { acknowledgePull: true }));
+  server.register('sandbox.setup', async (p) => rt.sandboxSetup.start(p as { acknowledgePull: true; versionPolicy?: 'pinned' | 'latest' }));
   server.register('sandbox.cancel', async () => rt.sandboxSetup.cancel());
   server.register('sandbox.status', async () => rt.sandboxSetup.status());
   rt.listeners.sandbox.add((s) => server.emit({ event: 'sandbox.progress', payload: s as unknown as Record<string, unknown> }));

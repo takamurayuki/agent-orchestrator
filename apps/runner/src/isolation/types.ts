@@ -62,4 +62,4 @@ export const CONTAINER_USER = '1001:1001';
 export const PROXY_ALIAS = 'egress-proxy';
 export const PROXY_PORT = 3128;
 /** ホスト⇄ボリューム同期から除外するパス */
-export const SYNC_EXCLUDES = ['node_modules', '.pnpm-store', '.npm-cache', '.yarn-cache', '.turbo', 'coverage', 'dist', 'build', '.next', '.svelte-kit'];
+export const SYNC_EXCLUDES = ['node_modules', '.pnpm-store', '.npm-cache', '.yarn-cache', '.venv', '.uv-cache', '.pip-cache', '__pycache__', '.pytest_cache', '.mypy_cache', '.ruff_cache', '.turbo', 'coverage', 'dist', 'build', '.next', '.svelte-kit'];

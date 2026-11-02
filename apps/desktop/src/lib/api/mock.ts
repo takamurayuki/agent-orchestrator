@@ -134,7 +134,8 @@ export class MockTransport implements Transport {
 
     'sandbox.status': () => structuredClone(this.setup),
 
-    'sandbox.setup': ({ acknowledgePull }) => {
+    'sandbox.setup': ({ acknowledgePull, versionPolicy }) => {
+      void versionPolicy;
       if (acknowledgePull !== true) this.fail('INVALID_PARAMS', 'ベースイメージの取得への同意（acknowledgePull）が必要です');
       if (this.setup.state === 'running') this.fail('INVALID_STATE', 'サンドボックスの準備は既に実行中です');
       this.setupAttempts += 1;
