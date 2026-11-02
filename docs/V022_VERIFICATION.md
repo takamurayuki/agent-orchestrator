@@ -1,6 +1,6 @@
 # v0.2.2 最終安定化・リリース検証レポート
 
-実施日: 2026-11-02　ベースライン: v0.2.1（`9d6ba7a`、Vitest 249 / Playwright 29 / 受入 56 PASS を実リポジトリで確認）　実施者: 実装者（同一 PC、Windows 11 Pro 10.0.26200）
+実施日: 2026-11-02　ベースライン: v0.2.1（`9d6ba7a`、Vitest 249 / Playwright 29 / 受入 56 PASS を実リポジトリで確認）　実施者: 実装者（同一 PC、Windows 11 Pro）
 
 > 原則: 未検証項目は PASS と扱わない。モックの成功を実 CLI の成功として報告しない。Docker 隔離・seccomp・egress allowlist・Policy Gate・Completion Gate は変更していない。
 
