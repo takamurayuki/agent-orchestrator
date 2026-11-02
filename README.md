@@ -52,7 +52,7 @@ tests/       integration（実 Docker）・e2e（実 CLI、RUN_LIVE_E2E=1）・f
 | Claude Code / Codex の認証ファイル | ホストで一度ログインしておく（`claude` / `codex login`）。アプリは認証を代行しません |
 | Node.js | **不要**（サイドカーに同梱） |
 
-インストーラは**未署名**です（署名鍵なし）。SmartScreen の警告が出ます。社内検証用のリリース候補として扱い、一般公開版とは区別してください（`docs/RELEASE.md`）。
+インストーラは**未署名**です（署名鍵なし）。SmartScreen の警告が出ます。署名前のリリース候補（評価用）として扱い、署名済みの一般配布版とは区別してください（`docs/RELEASE.md`）。
 
 β版テスター向けの平易な手順・前提・料金・既知の制限・トラブルシューティングは `docs/BETA_TESTER_GUIDE.md`、問題報告は `docs/ISSUE_TEMPLATE.md`、協力者テストの手順は `docs/BETA_USER_TEST_PROTOCOL.md`、β運用の結果と次期改善は `docs/LIMITED_BETA_REPORT.md` を参照。
 
@@ -192,7 +192,7 @@ node scripts/live-policy-loop.mjs --name <id> --repo <path> --task tests/fixture
 ## 既知の制限・未検証事項
 
 - コード署名は未実施（署名鍵なし）。NSIS インストーラの作成・サイレントインストール・起動・アンインストールは実測済み（`docs/RC_VERIFICATION.md`）。未署名のため、リリース候補（RC）として社内配布に限定する。
-- サンドボックスイメージは配布物に含まれない。初回起動時に GUI から取得・ビルドする（Docker Hub への到達が必要。社内プロキシ環境では Docker Desktop 側のプロキシ設定が必要）。ビルド済みイメージのレジストリ配布は未実施。
+- サンドボックスイメージは配布物に含まれない。初回起動時に GUI から取得・ビルドする（Docker Hub への到達が必要。プロキシ環境では Docker Desktop 側のプロキシ設定が必要）。ビルド済みイメージのレジストリ配布は未実施。
 - クリーンな Windows 環境（別 PC / VM）での検証は未実施。同一 PC 上で PATH を最小化（Node / Git / Docker なし）した起動と、Node 非搭載 PATH での全フローを実測した。
 - 元プロジェクトへの反映（コミット・push）機能は無い。作業用コピーのパスを示すだけで、取り込みは利用者が Git ツールで行う。
 - 外部テスターによる操作性評価は未実施。

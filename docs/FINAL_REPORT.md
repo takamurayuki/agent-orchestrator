@@ -139,7 +139,7 @@ Vitest 261 passed / 8 skipped（実 Docker 7 件含む）、Playwright 31 passed
 - **外部テスター向け:** `docs/BETA_TESTER_GUIDE.md`（事前準備・手順・料金が発生する操作・既知の制限・未署名の明示・トラブルシューティング）、`docs/ISSUE_TEMPLATE.md`。
 - **実用性評価（小規模タスク 5 件、機械回答）:** COMPLETED 1、NEEDS_HUMAN 1（依頼と既存実装の衝突。Codex の指摘は妥当）、PRECHECK_FAILED 2（pnpm 12 の minimumReleaseAge ポリシーで baseline install が失敗。AI 未実行・料金なし）、承認不可 1（禁止操作検出の偽陽性 → 修正して再実行）。AI 承認後に人間が見つけた問題 0。累積（16 タスク）: 完了率 53%、平均 246 秒、Builder 合計 $1.31。
 - **修正した不具合（重大でないが実用性を損なうもの）:** (1) `EXTERNAL_POST` 検出がサービス名だけで一致する偽陽性 → 送信・投稿・通知の語との共起に限定（回帰テスト 7 件）。(2) ベースライン検証失敗の理由文に既知原因（minimumReleaseAge / ロックファイル不一致 / 通信エラー / タイムアウト）の診断を追加（ポリシーは緩めない）。
-- **判定:** β版（社内・限定テスター、未署名）として配布 **可**。一般公開は **不可**（未署名、別環境未検証、外部評価未実施、対応プロジェクトが Node + pnpm 限定）。
+- **判定:** β版（限定テスター、未署名）として配布 **可**。一般公開は **不可**（未署名、別環境未検証、外部評価未実施、対応プロジェクトが Node + pnpm 限定）。
 - 自動テスト: Vitest 209 passed / 1 skipped（LIVE 用ファイル、実 Docker 7 件含む）、Playwright 26 passed、svelte-check / tsc / cargo check / eslint クリーン。セキュリティ制約（コンテナ強化フラグ、egress allowlist、コマンド allowlist、Policy Gate）に変更なし。
 
 ## 0⁶. v0.1.0 公開準備の最終改善（2026-11-01 追記）

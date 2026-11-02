@@ -17,7 +17,7 @@
 | **Claude Code のログイン**（Anthropic のアカウント） | ターミナルで `claude` を一度起動してログイン | 「Claude 認証」が失敗と表示されます |
 | **Codex のログイン**（OpenAI のアカウント） | ターミナルで `codex login` | 「Codex 認証」が失敗と表示されます |
 | 試したい **Git 管理されたプロジェクト**（Node.js 製、`package.json` に `typecheck` / `lint` / `test:run` スクリプトがあるもの） | — | プロジェクト選択時に「検証スクリプトが不足」と表示され、開始できません |
-| ネットワーク（Docker Hub、npm レジストリ、Anthropic / OpenAI への接続） | — | 初回セットアップや実行が失敗します（社内プロキシ環境では Docker Desktop のプロキシ設定が必要） |
+| ネットワーク（Docker Hub、npm レジストリ、Anthropic / OpenAI への接続） | — | 初回セットアップや実行が失敗します（プロキシ環境では Docker Desktop のプロキシ設定が必要） |
 
 Node.js や pnpm は**不要**です（アプリに同梱されています）。ログインは一度だけ必要で、アプリはパスワードや API キーを保存・表示しません。
 
@@ -68,7 +68,7 @@ Node.js や pnpm は**不要**です（アプリに同梱されています）�
 | 「Docker CLI: 失敗」「Docker デーモン: 失敗」 | Docker Desktop を起動し、Settings → General で WSL 2 based engine を有効にして「再チェック」 |
 | 「Git: 失敗」 | Git for Windows をインストールし、PC を再起動（PATH 反映）後に「再チェック」 |
 | 「Claude 認証 / Codex 認証: 失敗」 | ターミナルで `claude`（または `codex login`）を実行してログイン後、「再チェック」 |
-| サンドボックスの準備が「失敗」 | 表示される「原因」と「復旧方法」に従い「再試行」。ネットワーク（Docker Hub / npm）に到達できない場合は社内プロキシの設定を確認。「ダイジェスト不一致」は停止が正常です（開発者に連絡） |
+| サンドボックスの準備が「失敗」 | 表示される「原因」と「復旧方法」に従い「再試行」。ネットワーク（Docker Hub / npm）に到達できない場合はプロキシの設定を確認。「ダイジェスト不一致」は停止が正常です（開発者に連絡） |
 | プロジェクトを選ぶと「Git リポジトリではありません」 | Git 管理されたフォルダーのルートを選んでください |
 | 「検証スクリプトが不足しています」 | プロジェクトの `package.json` に `typecheck` / `lint` / `test:run` を用意してください |
 | 「実行前の確認で止まりました」 | 変更前のプロジェクトで `typecheck` / `lint` / `test:run` が通る状態にしてから再実行 |
