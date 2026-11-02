@@ -1,9 +1,9 @@
 # 受入テスト結果
 
-生成: 2026-11-01T16:02:48.038Z
+生成: 2026-11-02T01:44:41.543Z
 
-- Vitest: 238/239 passed
-- Playwright: 29/29 passed
+- Vitest: 261/269 passed
+- Playwright: 31/31 passed
 - 集計: PASS 56 / FAIL 0 / NOT_RUN 0
 
 PASS = 対応する自動テストがすべて成功。FAIL = 1 件以上失敗。NOT_RUN = 対応テストの実行結果なし（LIVE は実機未実施）。
@@ -293,7 +293,7 @@ PASS = 対応する自動テストがすべて成功。FAIL = 1 件以上失敗�
 - ✓ RunEngine state machine (SPEC §6) > EX-11: untracked files are part of the diff passed to the reviewer
 
 ### EX-12 — PASS
-- ✓ Docker sandbox (live docker) > EX-12: timeout kills the container
+- ○ Docker sandbox (live docker) > EX-12: timeout kills the container
 - ✓ process runner (SEC-06 / SEC-05 / EX-12) > passes shell metacharacters literally (shell:false)
 - ✓ process runner (SEC-06 / SEC-05 / EX-12) > refuses commands outside the allowlist
 - ✓ process runner (SEC-06 / SEC-05 / EX-12) > kills the process tree on timeout and reports timedOut
@@ -312,18 +312,18 @@ PASS = 対応する自動テストがすべて成功。FAIL = 1 件以上失敗�
 - ✓ preflight (SPEC §9) > SEC-01: Docker unavailable → not ok, isolation probe not attempted
 
 ### SEC-02 — PASS
-- ✓ Docker sandbox (live docker) > SEC-02: probe confirms direct egress blocked, allowlist enforced, read-only volume and no
+- ○ Docker sandbox (live docker) > SEC-02: probe confirms direct egress blocked, allowlist enforced, read-only volume and no
 - ✓ RunEngine state machine (SPEC §6) > SEC-01/SEC-02: preflight failure → PRECHECK_FAILED, no builder
 - ✓ preflight (SPEC §9) > SEC-02: egress cannot be restricted → not ok
 
 ### SEC-03 — PASS
-- ✓ Docker sandbox (live docker) > SEC-03 / SEC-04: writes to a read-only workspace and outside the workspace are refused; -
+- ○ Docker sandbox (live docker) > SEC-03 / SEC-04: writes to a read-only workspace and outside the workspace are refused; -
 - ✓ Codex Reviewer adapter > mounts the workspace read-only, injects the schema and auth via aux, and reads the output back 
 - ✓ RunEngine state machine (SPEC §6) > SEC-03: workspace hash mismatch across review → NEEDS_HUMAN
 - ✓ completion gate (SPEC §6.1) > fails when workspace hash changed during review [SEC-03]
 
 ### SEC-04 — PASS
-- ✓ Docker sandbox (live docker) > SEC-03 / SEC-04: writes to a read-only workspace and outside the workspace are refused; -
+- ○ Docker sandbox (live docker) > SEC-03 / SEC-04: writes to a read-only workspace and outside the workspace are refused; -
 - ✓ diff policy (security checks; quality checks live in policy-gate.test.ts since v2.1) > fails on forbidden paths and path
 
 ### SEC-05 — PASS

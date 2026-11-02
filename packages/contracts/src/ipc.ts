@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { DraftViewSchema } from './draft.js';
-import { PolicyFindingSchema, RunEventSchema, RunStatusSchema, ScopeCheckSchema } from './run.js';
+import { PolicyFindingSchema, RunEventSchema, RunStatusSchema, ScopeCheckSchema, FailureDiagnosisSchema } from './run.js';
 import { AcceptanceCriterionSchema } from './task.js';
 
 /** MVP で許可する IPC method（contracts/ipc.schema.json と同一の allowlist）。 */
@@ -233,7 +233,9 @@ export const RunReportResultSchema = z.strictObject({
   /** 最終ラウンドの Policy Gate 検出（v2.1）。未承認 blocking があれば COMPLETED にならない */
   policyFindings: z.array(PolicyFindingSchema),
   /** 最終ラウンドのスコープ判定（v0.2.0） */
-  scopeCheck: ScopeCheckSchema.nullable().default(null)
+  scopeCheck: ScopeCheckSchema.nullable().default(null),
+  /** 失敗の診断（v0.2.2）。COMPLETED と進行中は null */
+  failureDiagnosis: FailureDiagnosisSchema.nullable().default(null)
 });
 export type RunReportResult = z.infer<typeof RunReportResultSchema>;
 

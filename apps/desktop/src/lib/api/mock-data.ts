@@ -561,6 +561,7 @@ export function seedHistory(): Array<{ run: RunStatus; report: RunReportResult }
         egress: { available: true, allowed: 14, denied: 2, errors: 0, allowedHosts: ['api.anthropic.com', 'chatgpt.com', 'registry.npmjs.org'], deniedHosts: [{ host: 'ab.chatgpt.com', count: 2 }], errorHosts: [] },
         policyFindings: [],
         scopeCheck: null,
+        failureDiagnosis: null,
         reportPath: completed.runDir + '\\report.md',
         worktreePath: completed.worktreePath
       }
@@ -600,6 +601,16 @@ export function seedHistory(): Array<{ run: RunStatus; report: RunReportResult }
         egress: { available: true, allowed: 14, denied: 2, errors: 0, allowedHosts: ['api.anthropic.com', 'chatgpt.com', 'registry.npmjs.org'], deniedHosts: [{ host: 'ab.chatgpt.com', count: 2 }], errorHosts: [] },
         policyFindings: [],
         scopeCheck: null,
+        failureDiagnosis: {
+          category: 'limit_reached',
+          confidence: 'confirmed',
+          whatHappened: 'AI レビューの指摘が修正上限（3 回）内に解消しませんでした。検証コマンドはすべて成功しています。',
+          impact: '変更は途中の状態で作業用コピーに残っています。そのまま取り込まないでください。',
+          autoRecoverable: 'no',
+          autoRecoveryNote: '指摘は毎ラウンド AI に差し戻しています。上限を超えたため人の判断が必要です。',
+          nextSteps: ['「未解決の指摘」を確認し、妥当なら開発者に修正を依頼する', '指摘が要件の解釈違いなら、依頼内容を具体的にして新しい依頼を作る'],
+          evidence: ['[high] src/server/export/csv.ts:2 BOM が文字列連結で付与されているが、ストリーミング出力経路（exportLarge）では付与されていない。']
+        },
         reportPath: needsHuman.runDir + '\\report.md',
         worktreePath: needsHuman.worktreePath
       }

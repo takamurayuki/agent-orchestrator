@@ -51,6 +51,11 @@ pub const RUNNER_EVENT: &str = "runner://event";
 
 /// Per-request timeout.
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
+/// Per-request timeout for draft (requirements) methods. draft.create / draft.answer / draft.revise run up to three
+/// model calls (interview, contradiction detection, proposal; 300 s each in the runner), so 120 s is not enough:
+/// in the v0.2.2 packaged-app verification a 147 s draft.answer timed out here, the GUI showed an error and the
+/// result of the re-evaluation was lost. Other methods keep the short timeout.
+pub const DRAFT_REQUEST_TIMEOUT: Duration = Duration::from_secs(20 * 60);
 
 /// How long to wait for `runner.ready` after spawning before giving up.
 const READY_TIMEOUT: Duration = Duration::from_secs(20);
@@ -331,7 +336,7 @@ impl<R: Runtime> SidecarManager<R> {
         Ok(())
     }
 
-    /// Send one request and wait for its response (120 s timeout).
+    /// Send one request and wait for its response (120 s timeout; 20 min for draft.* methods).
     pub async fn call(&self, method: &str, params: Map<String, Value>) -> Result<Value, IpcError> {
         if !ALLOWED_METHODS.contains(&method) {
             return Err(IpcError::new(
@@ -376,7 +381,8 @@ impl<R: Runtime> SidecarManager<R> {
             Arc::clone(&inst.pending)
         };
 
-        match tokio::time::timeout(REQUEST_TIMEOUT, rx).await {
+        let timeout = if method.starts_with("draft.") { DRAFT_REQUEST_TIMEOUT } else { REQUEST_TIMEOUT };
+        match tokio::time::timeout(timeout, rx).await {
             Ok(Ok(result)) => result,
             Ok(Err(_canceled)) => Err(IpcError::new(
                 "RUNNER_UNAVAILABLE",
@@ -388,7 +394,7 @@ impl<R: Runtime> SidecarManager<R> {
                 }
                 Err(IpcError::new(
                     "RUNNER_TIMEOUT",
-                    format!("ランナーが {} 秒以内に応答しませんでした ({method})", REQUEST_TIMEOUT.as_secs()),
+                    format!("ランナーが {} 秒以内に応答しませんでした ({method})", timeout.as_secs()),
                 ))
             }
         }

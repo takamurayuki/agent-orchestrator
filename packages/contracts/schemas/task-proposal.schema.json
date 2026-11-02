@@ -125,6 +125,46 @@
           "reason": {
             "type": "string",
             "minLength": 1
+          },
+          "inputs": {
+            "type": "array",
+            "description": "生成スクリプトの入力の分類（v0.2.2）。リポジトリ調査が付与する",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "path",
+                "status",
+                "detail"
+              ],
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "tracked",
+                    "ignored",
+                    "missing",
+                    "unknown"
+                  ]
+                },
+                "detail": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "inputStatus": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "missing",
+              "unknown"
+            ],
+            "description": "ok: 入力はすべて Git 追跡 / missing: Git 管理外の入力がある / unknown: 確定できない"
           }
         }
       }

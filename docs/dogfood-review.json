@@ -174,5 +174,35 @@
     "agrees": true,
     "notes": "v0.2.1: 依頼文に docs/API.md の言及が無くても、facts（generated.file: docs/API.md ← docs:api）から素案が generatedArtifacts を識別。R1 は Builder 側 Claude Code の自前ヒューリスティック（brace with quote character）がコマンドを拒否して再生成できず、Verifier の generate:docs:api が不合格（stale）→ R2 で再生成して合格、Reviewer approved、COMPLETED、176 秒、/usr/bin/bash.09。観察: Verifier の再生成がワークスペースに残り R2 の Builder が「最初から最新だった」と報告 → 退避・復元を追加（v021b で再確認）。",
     "missed": []
+  },
+  "v022-test01-farewell": {
+    "verdict": "approved",
+    "agrees": true,
+    "notes": "TEST-01 正常終了: 素案が docs/API.md（docs:api、入力はすべて Git 追跡 = ok）を識別、1 ラウンドで検証 6/6（generate:docs:api 含む）、Codex approved、COMPLETED。差分は期待範囲内（scope none）。",
+    "missed": []
+  },
+  "v022-test02-safejoin": {
+    "verdict": "approved",
+    "agrees": true,
+    "notes": "TEST-02 自動修正: R1 で Codex が high 2 件（%25 の拒否漏れ、相対 baseDir の誤拒否）を指摘 → フィードバックが Builder に渡り R2 で修正 → Codex approved、COMPLETED。ヒアリングでは矛盾質問 CONTRA-001（リテラル % の扱い）が出て機械回答で解消。",
+    "missed": []
+  },
+  "v022-test03-shout": {
+    "verdict": "approved",
+    "agrees": true,
+    "notes": "TEST-03 生成物: docs/API.md を docs:api で再生成し、Verifier の generate:docs:api（ハッシュ比較）が合格。1 ラウンド COMPLETED。",
+    "missed": []
+  },
+  "v022-test04-missing-input": {
+    "verdict": "approved",
+    "agrees": true,
+    "notes": "TEST-04 入力不足: 生成器 scripts/gen-stats.mjs が .gitignore 対象の data/ を読むことを調査が検出（facts generation.input、inputStatus missing）し、承認前に GENIN-4-1 で「対象外 / 入力なしで再生成」を質問。機械回答 manual → 生成物を外し outOfScope に記録、Builder の変更は scripts/gen-stats.mjs のみ、COMPLETED。入力不足を無視して成功扱いにはしていない。",
+    "missed": []
+  },
+  "v022-test05-policy-required": {
+    "verdict": "changes_requested",
+    "agrees": true,
+    "notes": "TEST-05 安全な停止: 人間が書いた task.yaml が eslint-disable コメントを必須にする（Policy Gate と両立不可）。R1 Builder が抑制コメントを書く → Policy Gate PG-ESLINT-DISABLE で POLICY_BLOCKED → R2 Builder が抑制コメント無しの実装に変更 → Policy Gate 0、検証 PASS、Codex が要件違反（出力しない / 必須コメント無し）を指摘 → R3 Builder が再び抑制コメント → POLICY_BLOCKED → NEEDS_HUMAN / POLICY_VIOLATION。制約は緩めず停止。report.md に停止理由の診断（policy_violation）。",
+    "missed": []
   }
 }

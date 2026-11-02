@@ -1,5 +1,6 @@
 import type { ResolvedTask, RoundRecord, RunStatus } from '@agent-orchestrator/contracts';
 import { maskSecrets } from './masking.js';
+import { diagnoseFailure } from './failure-diagnosis.js';
 
 /** report.md 生成（純粋関数）。秘密情報はマスキングし、完了/要確認/中断を明示する。 */
 export interface ReportInput {
@@ -48,6 +49,22 @@ export function renderReport(input: ReportInput): string {
   lines.push('## 次の手動操作');
   for (const a of status.nextActions.length > 0 ? status.nextActions : ['（なし）']) lines.push(`- ${a}`);
   lines.push('');
+  // 失敗の診断（v0.2.2、D-43）: 記録からの決定的な分類。原因不明は unknown のまま
+  const diagnosis = diagnoseFailure({ run: status, rounds });
+  if (diagnosis) {
+    lines.push('## 停止理由の診断（記録からの自動分類）');
+    lines.push(`- 分類: ${diagnosis.category}（確度: ${diagnosis.confidence}）`);
+    lines.push(`- 何が起きたか: ${maskSecrets(diagnosis.whatHappened)}`);
+    lines.push(`- 開発結果への影響: ${diagnosis.impact}`);
+    lines.push(`- 自動修復: ${diagnosis.autoRecoverable === 'yes' ? '可能' : diagnosis.autoRecoverable === 'no' ? '不可（人の判断が必要）' : '不明'}。${diagnosis.autoRecoveryNote}`);
+    lines.push('- 次に取る操作:');
+    for (const s of diagnosis.nextSteps) lines.push(`  - ${s}`);
+    if (diagnosis.evidence.length > 0) {
+      lines.push('- 根拠:');
+      for (const e of diagnosis.evidence) lines.push(`  - ${maskSecrets(e).replace(/\n/g, ' ')}`);
+    }
+    lines.push('');
+  }
 
   lines.push('## 要件');
   for (const r of task.requirements) lines.push(`- ${r}`);

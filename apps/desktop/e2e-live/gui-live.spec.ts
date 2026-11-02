@@ -34,6 +34,14 @@ async function answerCurrentRound(page: Page): Promise<void> {
     }
   }
   await page.getByTestId('answer-round').click();
+  // 回答送信後の再評価（モデル呼び出し）は 1〜2 分かかり、その間は前ラウンドの質問が無効化されたまま表示される。
+  // トップバーの「回答送信中…」が消えるまで待ってから次のラウンド判定へ進む（v0.2.2 配布版検証で判明）
+  // click 直後は busy 表示が描画前のことがあるので、まず少し待ってから「消える」のを待ち、さらに draft の状態が GAP_ANALYZING でなくなるまで待つ
+  // （二重送信すると Runner が INVALID_STATE「状態 GAP_ANALYZING では回答できません」を返す）
+  await page.waitForTimeout(1500);
+  await expect(page.getByText(/回答送信中/)).toBeHidden({ timeout: 300_000 });
+  await expect(page.getByTestId('draft-state')).not.toContainText('GAP_ANALYZING', { timeout: 300_000 });
+  await expect(page.getByTestId('answer-round').or(page.getByTestId('approve-section')).first()).toBeVisible({ timeout: 300_000 });
 }
 
 test.describe('LIVE GUI (Tauri + real runner)', () => {
@@ -65,6 +73,7 @@ test.describe('LIVE GUI (Tauri + real runner)', () => {
     test.skip(expectEnvFail || process.env.LIVE_MODE === 'smoke', 'LIVE_EXPECT_ENV_FAIL=1 / LIVE_MODE=smoke のときはスキップ');
     expect(sampleRepo, 'LIVE_SAMPLE_REPO を指定してください').not.toBe('');
     const page = await connect();
+    await page.getByTestId('nav-home').click();
     await expect(page.getByTestId('screen-home')).toBeVisible({ timeout: 60_000 });
     // 実 Runner の environment.check が返る（Rust → サイドカー接続の証明）
     const env = page.getByTestId('env-status');
@@ -78,7 +87,7 @@ test.describe('LIVE GUI (Tauri + real runner)', () => {
     await page.getByTestId('request').fill('greet 関数に、名前が空文字のときは "Hello, stranger!" を返す仕様を追加したい。テストも追加してください。');
     await expect(page.getByTestId('start')).toBeEnabled();
     await page.getByTestId('start').click();
-    await expect(page.getByTestId('screen-interview')).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByTestId('screen-interview')).toBeVisible({ timeout: 180_000 }); // draft 作成（調査 + 最初の質問）は 1 分を超えることがある
 
     // ヒアリング: 質問があれば回答、サマリーが出るまで（最大 6 ラウンド、各ラウンド最大 5 分）
     for (let round = 0; round < 6; round++) {

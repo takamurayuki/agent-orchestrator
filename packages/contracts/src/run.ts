@@ -138,6 +138,39 @@ export const BuilderOutcomeSchema = z.strictObject({
 });
 export type BuilderOutcome = z.infer<typeof BuilderOutcomeSchema>;
 
+/** 実行失敗の診断（v0.2.2、D-43）: 構造化された記録から決定的に分類した原因。unknown は原因不明のまま */
+export const FAILURE_CATEGORIES = [
+  'builder_command_denied',
+  'docker_error',
+  'network_blocked',
+  'dependency_fetch_failed',
+  'supply_chain_policy',
+  'generated_artifact',
+  'review_undecidable',
+  'limit_reached',
+  'verification_failed',
+  'policy_violation',
+  'scope_deviation',
+  'builder_failed',
+  'no_changes',
+  'precheck',
+  'cancelled',
+  'unknown'
+] as const;
+export type FailureCategory = (typeof FAILURE_CATEGORIES)[number];
+export const FailureDiagnosisSchema = z.strictObject({
+  category: z.enum(FAILURE_CATEGORIES),
+  /** confirmed: 記録の決定的な証拠 / inferred: テキストの照合による推定 / unknown: 特定できない */
+  confidence: z.enum(['confirmed', 'inferred', 'unknown']),
+  whatHappened: z.string(),
+  impact: z.string(),
+  autoRecoverable: z.enum(['yes', 'no', 'unknown']),
+  autoRecoveryNote: z.string(),
+  nextSteps: z.array(z.string()),
+  evidence: z.array(z.string())
+});
+export type FailureDiagnosis = z.infer<typeof FailureDiagnosisSchema>;
+
 /** スコープ判定（v0.2.0、D-39）: 承認済み task の expectedChanges と差分の比較 */
 export const ScopeCheckSchema = z.strictObject({
   expected: z.array(z.string()),

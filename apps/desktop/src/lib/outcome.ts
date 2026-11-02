@@ -1,4 +1,26 @@
-import type { RunEvent, RunReportResult, RunStatus } from '@agent-orchestrator/contracts';
+import type { FailureDiagnosis, RunEvent, RunReportResult, RunStatus } from '@agent-orchestrator/contracts';
+
+/** 失敗の診断（v0.2.2）の分類ラベル */
+export const FAILURE_CATEGORY_LABELS: Record<FailureDiagnosis['category'], string> = {
+  builder_command_denied: '実装 AI のコマンド拒否',
+  docker_error: 'Docker（隔離環境）のエラー',
+  network_blocked: '通信の制限',
+  dependency_fetch_failed: '依存関係の取得失敗',
+  supply_chain_policy: 'サプライチェーンポリシー',
+  generated_artifact: '生成物の更新確認の失敗',
+  review_undecidable: 'AI レビューの判定不能',
+  limit_reached: '修正回数・時間の上限',
+  verification_failed: '検証コマンドの失敗',
+  policy_violation: 'ポリシー違反',
+  scope_deviation: '承認範囲外の変更',
+  builder_failed: '実装 AI の異常終了',
+  no_changes: '変更なし',
+  precheck: '実行前の確認で停止',
+  cancelled: '中断',
+  unknown: '原因不明'
+};
+export const AUTO_RECOVERY_LABELS: Record<FailureDiagnosis['autoRecoverable'], string> = { yes: '自動で再試行します', no: '自動では直りません（人の判断が必要）', unknown: '判断できません' };
+export const CONFIDENCE_LABELS: Record<FailureDiagnosis['confidence'], string> = { confirmed: '確定', inferred: '推定', unknown: '不明' };
 import { isTerminalRunState, type Tone } from './labels';
 
 /**

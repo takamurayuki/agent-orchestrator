@@ -18,10 +18,22 @@ export type AcceptanceCriterion = z.infer<typeof AcceptanceCriterionSchema>;
  * 生成物の更新要件（v0.2.1、D-41）。script は package.json の scripts 名（任意のシェルコマンドは不可）。
  * Verifier が `pnpm run <script>` を実行して生成物が最新であることを確認する。
  */
+/** 生成スクリプトの入力の分類（v0.2.2、D-42）。tracked: Git 追跡 / ignored: .gitignore 対象 / missing: 未追跡または存在しない / unknown: 静的に確定できない */
+export const GeneratedInputSchema = z.strictObject({
+  path: z.string().min(1),
+  status: z.enum(['tracked', 'ignored', 'missing', 'unknown']),
+  detail: z.string()
+});
+export type GeneratedInput = z.infer<typeof GeneratedInputSchema>;
+
 export const GeneratedArtifactSchema = z.strictObject({
   path: z.string().min(1),
   script: z.string().min(1).regex(/^[A-Za-z0-9_:.@/-]+$/, 'script は package.json の scripts 名'),
-  reason: z.string().min(1)
+  reason: z.string().min(1),
+  /** リポジトリ調査が付与する入力の分類（モデル出力には無くてよい） */
+  inputs: z.array(GeneratedInputSchema).optional(),
+  /** ok: 入力はすべて Git 追跡 / missing: Git 管理外の入力がある（隔離ワークスペースでは再現できない） / unknown: 静的解析で確定できない */
+  inputStatus: z.enum(['ok', 'missing', 'unknown']).optional()
 });
 export type GeneratedArtifact = z.infer<typeof GeneratedArtifactSchema>;
 

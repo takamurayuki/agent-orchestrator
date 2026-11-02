@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { REASON_CODE_LABELS, RUN_STATE_TONES, formatDateTime, isTerminalRunState, runStateLabel } from '../lib/labels';
-  import { SEVERITY_LABELS, describeOutcome, severityImpact, severityTone } from '../lib/outcome';
+  import { AUTO_RECOVERY_LABELS, CONFIDENCE_LABELS, FAILURE_CATEGORY_LABELS, SEVERITY_LABELS, describeOutcome, severityImpact, severityTone } from '../lib/outcome';
   import { app } from '../lib/stores/app.svelte';
   import { loadHistory, openRunReport, resumeRun, revealWorktree } from '../lib/stores/actions';
   import { getTransport } from '../lib/api';
@@ -106,6 +106,38 @@
               </ol>
             </dd>
           </dl>
+          {#if report.failureDiagnosis}
+            {@const d = report.failureDiagnosis}
+            <section class="diagnosis" aria-labelledby="failure-diagnosis-heading" data-testid="failure-diagnosis" data-category={d.category}>
+              <h3 id="failure-diagnosis-heading">停止理由の診断: {FAILURE_CATEGORY_LABELS[d.category]} <span class="small muted">（記録からの自動分類、確度: {CONFIDENCE_LABELS[d.confidence]}）</span></h3>
+              <dl class="guidance">
+                <dt>何が起きたか</dt>
+                <dd>{d.whatHappened}</dd>
+                <dt>開発結果への影響</dt>
+                <dd>{d.impact}</dd>
+                <dt>自動修復</dt>
+                <dd>{AUTO_RECOVERY_LABELS[d.autoRecoverable]}。{d.autoRecoveryNote}</dd>
+                <dt>次に取る操作</dt>
+                <dd>
+                  <ol>
+                    {#each d.nextSteps as s, i (i)}
+                      <li>{s}</li>
+                    {/each}
+                  </ol>
+                </dd>
+              </dl>
+              {#if d.evidence.length > 0}
+                <details>
+                  <summary>根拠（記録の抜粋）</summary>
+                  <ul class="small">
+                    {#each d.evidence as e, i (i)}
+                      <li><code>{e}</code></li>
+                    {/each}
+                  </ul>
+                </details>
+              {/if}
+            </section>
+          {/if}
           {#if run.reasonDetail}
             <Alert tone={RUN_STATE_TONES[run.state]} role="status" title={run.state === 'PRECHECK_FAILED' ? '問題の内容' : 'システムからの詳細'} message={run.reasonDetail} testid="result-reason-detail" />
           {/if}

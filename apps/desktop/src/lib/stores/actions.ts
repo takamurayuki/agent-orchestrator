@@ -112,10 +112,13 @@ export async function inspectProject(path: string): Promise<void> {
 export async function createDraft(): Promise<void> {
   if (!app.canStart || !app.project) return;
   const transport = getTransport();
+  // 新しい依頼を作る前に前回の draft / 承認結果を消す。消さないと、作成中（数十秒）にヒアリング画面へ移ると
+  // 前回の（承認済みの）要件サマリーが表示され、承認ボタンが「既に承認済み」で止まる（v0.2.2 配布版検証で観察）
+  app.draft = null;
+  app.approval = null;
   const draft = await guarded('draft 作成', () => transport.call('draft.create', { projectPath: app.project!.path, request: app.request.trim() }));
   if (draft) {
     app.draft = draft;
-    app.approval = null;
     app.navigate('interview');
     app.announce(`ヒアリングを開始しました。ラウンド ${draft.round}、質問 ${draft.currentQuestions.length} 件`);
   }

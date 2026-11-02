@@ -239,7 +239,7 @@ test.describe('UI-14 承認前後の状態遷移と再起動後の履歴', () =>
     await expect(page.getByTestId('approve')).toBeDisabled();
     await expect(page.getByTestId('approve-reasons')).toContainText('既に承認済み');
     await page.getByTestId('nav-running').click();
-    await expect(page.getByTestId('screen-result')).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId('screen-result')).toBeVisible({ timeout: 30_000 });
   });
 
   test('UI-14b: 再起動（リロード）後も履歴に残り、選択すると結果が表示される', async ({ page }) => {

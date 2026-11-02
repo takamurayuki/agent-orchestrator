@@ -78,7 +78,9 @@ export async function verifyGeneratedArtifacts(sandbox: SandboxExecutor, input: 
     } else if (before !== after) {
       results.push(fail(`生成物 ${a.path} が最新ではありません: ${a.script} を再実行すると内容が変わります（Builder が再生成していない、または手で編集した）。${a.script} を実行して結果をそのまま含めてください`));
     } else {
-      results.push({ name, argv: ['pnpm', 'run', a.script], exitCode: 0, timedOut: false, durationMs: Date.now() - started, stdoutExcerpt: `生成物 ${a.path} は最新です（${a.script} の再実行で変化なし）`, stderrExcerpt: '', truncated: false });
+      const missingInputs = (a.inputs ?? []).filter((i) => i.status === 'ignored' || i.status === 'missing').map((i) => i.path);
+      const validity = a.inputStatus === 'missing' ? `。ただし入力 ${missingInputs.join(', ')} は Git 管理外で隔離環境に無いため、内容の妥当性は未確認（最新性のみ確認）` : a.inputStatus === 'unknown' ? '。入力は静的に確定できないため、内容の妥当性は未確認（最新性のみ確認）' : '';
+      results.push({ name, argv: ['pnpm', 'run', a.script], exitCode: 0, timedOut: false, durationMs: Date.now() - started, stdoutExcerpt: `生成物 ${a.path} は最新です（${a.script} の再実行で変化なし）${validity}`, stderrExcerpt: '', truncated: false });
     }
   }
   return results;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { DecisionRecord, TaskProposal } from '@agent-orchestrator/contracts';
-import { applyGenerationDecisions, detectGeneratedFiles, detectGenerationScripts, generationFacts, generationQuestions, unknownGenerationScripts } from '../../src/requirements/generated.js';
+import { applyGenerationDecisions, attachGeneratorInputs, detectGeneratedFiles, detectGenerationScripts, extractGeneratorPaths, generationFacts, generationQuestions, generatorInputFacts, inputQuestions, summarizeInputStatus, unknownGenerationScripts, type GeneratorAnalysis } from '../../src/requirements/generated.js';
 
 const scripts = { typecheck: 'tsc', lint: 'eslint .', 'test:run': 'vitest run', 'quality:report': 'node scripts/quality-report.mjs', 'gen:schemas': 'node scripts/gen-schemas.mjs', build: 'tsc -b' };
 const files = ['package.json', 'scripts/quality-report.mjs', 'scripts/gen-schemas.mjs', 'docs/QUALITY_REPORT.md', 'docs/DECISIONS.md', 'src/schemas.generated.ts', 'README.md'];
@@ -86,5 +86,68 @@ describe('generated artifacts: unknown scripts become blocking questions, answer
     expect(applied.outOfScope).toContain('生成物 src/schemas.generated.ts の更新（人が後で行う）');
     // 失効した判断や GEN- 以外の判断は無視
     expect(applyGenerationDecisions(p, [decision(qs[0]!.question, 'quality:report', 'GEN-2-1', 'superseded'), decision('別の質問', 'a', 'Q-001')])).toEqual(p);
+  });
+});
+
+describe('generator input analysis (D-42): static paths from node scripts, never guessed', () => {
+  const qualityReport = [
+    "import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';",
+    "import { dirname, join } from 'node:path';",
+    "const root = join(dirname(fileURLToPath(import.meta.url)), '..');",
+    "const dir = join(root, 'test-results', 'dogfood');",
+    "const files = existsSync(dir) ? readdirSync(dir).filter((f) => f.endsWith('.json')).sort() : [];",
+    "const runs = files.map((f) => ({ file: f, ...JSON.parse(readFileSync(join(dir, f), 'utf8')) }));",
+    "const reviewPath = join(root, 'docs', 'dogfood-review.json');",
+    "const humanReview = existsSync(reviewPath) ? JSON.parse(readFileSync(reviewPath, 'utf8')) : {};",
+    "writeFileSync(join(root, 'docs', 'QUALITY_REPORT.md'), lines.join('\\n'));"
+  ].join('\n');
+  const apiDocs = [
+    "import { readdirSync, readFileSync, writeFileSync } from 'node:fs';",
+    "for (const f of readdirSync('src').filter((x) => x.endsWith('.ts')).sort()) {",
+    "  const src = readFileSync('src/' + f, 'utf8');",
+    "}",
+    "writeFileSync('docs/API.md', lines.join('\\n') + '\\n');"
+  ].join('\n');
+
+  it('resolves join()/literal/concatenation paths and separates reads from writes', () => {
+    expect(extractGeneratorPaths(qualityReport)).toEqual({ reads: ['docs/dogfood-review.json', 'test-results/dogfood'], writes: ['docs/QUALITY_REPORT.md'], dynamic: false });
+    expect(extractGeneratorPaths(apiDocs)).toEqual({ reads: ['src'], writes: ['docs/API.md'], dynamic: false });
+  });
+
+  it('marks dynamic reads as unknown instead of inventing a path', () => {
+    const r = extractGeneratorPaths("const p = process.argv[2];\nconst t = readFileSync(p, 'utf8');\nwriteFileSync('out.json', t);");
+    expect(r).toEqual({ reads: [], writes: ['out.json'], dynamic: true });
+    expect(summarizeInputStatus({ script: 's', file: 'scripts/s.mjs', ...r, inputs: [] })).toMatchObject({ inputStatus: 'unknown' });
+    expect(summarizeInputStatus(undefined)).toEqual({ inputs: [], inputStatus: 'unknown' });
+    expect(summarizeInputStatus({ script: 's', file: null, reads: [], writes: [], dynamic: true, inputs: [] }).inputStatus).toBe('unknown');
+  });
+
+  it('attaches the classification to the proposal, emits facts, and asks a blocking GENIN- question only for missing inputs', () => {
+    const generators: Record<string, GeneratorAnalysis> = {
+      'quality:report': { script: 'quality:report', file: 'scripts/quality-report.mjs', reads: ['docs/dogfood-review.json', 'test-results/dogfood'], writes: ['docs/QUALITY_REPORT.md'], dynamic: false, inputs: [{ path: 'docs/dogfood-review.json', status: 'tracked', detail: 'Git 追跡対象' }, { path: 'test-results/dogfood', status: 'ignored', detail: '.gitignore 対象。ローカルにはあるが隔離ワークスペースには無い' }] },
+      'docs:api': { script: 'docs:api', file: 'scripts/gen-api-docs.mjs', reads: ['src'], writes: ['docs/API.md'], dynamic: false, inputs: [{ path: 'src', status: 'tracked', detail: 'Git 追跡対象' }] }
+    };
+    const p = proposal({ generatedArtifacts: [{ path: 'docs/QUALITY_REPORT.md', script: 'quality:report', reason: 'r' }, { path: 'docs/API.md', script: 'docs:api', reason: 'r' }, { path: 'x.generated.ts', script: 'gen:x', reason: 'r' }] });
+    const withInputs = attachGeneratorInputs(p, generators);
+    expect(withInputs.generatedArtifacts.map((a) => a.inputStatus)).toEqual(['missing', 'ok', 'unknown']);
+    const facts = generatorInputFacts(Object.values(generators));
+    expect(facts).toHaveLength(1);
+    expect(facts[0]!.value).toContain('test-results/dogfood');
+    expect(facts[0]!.confidence).toBe('confirmed');
+    const qs = inputQuestions(withInputs.generatedArtifacts, [], 2);
+    expect(qs).toHaveLength(1);
+    expect(qs[0]).toMatchObject({ id: 'GENIN-2-1', decisionImpact: 'blocking' });
+    expect(qs[0]!.question).toContain('生成物「docs/QUALITY_REPORT.md」');
+    expect(qs[0]!.question).toContain('test-results/dogfood');
+    expect(qs[0]!.options.map((o) => o.value)).toEqual(['manual', 'proceed']);
+    // 判断済みなら再質問しない
+    expect(inputQuestions(withInputs.generatedArtifacts, [decision(qs[0]!.question, 'proceed', 'GENIN-2-1')], 3)).toEqual([]);
+    // proceed → 残して未解決事項に記録 / manual → 外して対象外に記録
+    const proceed = applyGenerationDecisions(withInputs, [decision(qs[0]!.question, 'proceed', 'GENIN-2-1')]);
+    expect(proceed.generatedArtifacts).toHaveLength(3);
+    expect(proceed.openItems.some((o) => o.includes('内容の妥当性は未確認'))).toBe(true);
+    const manual = applyGenerationDecisions(withInputs, [decision(qs[0]!.question, 'manual', 'GENIN-2-1')]);
+    expect(manual.generatedArtifacts.map((a) => a.path)).toEqual(['docs/API.md', 'x.generated.ts']);
+    expect(manual.outOfScope.some((o) => o.includes('入力が Git 管理外'))).toBe(true);
   });
 });

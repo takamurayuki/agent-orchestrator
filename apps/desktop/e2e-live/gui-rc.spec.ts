@@ -30,6 +30,14 @@ async function answerCurrentRound(page: Page): Promise<void> {
     else await card.locator('textarea, input[type="text"]').first().fill('既存の規約に合わせて最小限で実装してください');
   }
   await page.getByTestId('answer-round').click();
+  // 回答送信後の再評価（モデル呼び出し）は 1〜2 分かかり、その間は前ラウンドの質問が無効化されたまま表示される。
+  // トップバーの「回答送信中…」が消えるまで待ってから次のラウンド判定へ進む（v0.2.2 配布版検証で判明）
+  // click 直後は busy 表示が描画前のことがあるので、まず少し待ってから「消える」のを待ち、さらに draft の状態が GAP_ANALYZING でなくなるまで待つ
+  // （二重送信すると Runner が INVALID_STATE「状態 GAP_ANALYZING では回答できません」を返す）
+  await page.waitForTimeout(1500);
+  await expect(page.getByText(/回答送信中/)).toBeHidden({ timeout: 300_000 });
+  await expect(page.getByTestId('draft-state')).not.toContainText('GAP_ANALYZING', { timeout: 300_000 });
+  await expect(page.getByTestId('answer-round').or(page.getByTestId('approve-section')).first()).toBeVisible({ timeout: 300_000 });
 }
 
 test.describe('RC: packaged app (GUI error / stop / restart)', () => {
@@ -61,6 +69,7 @@ test.describe('RC: packaged app (GUI error / stop / restart)', () => {
   test('RC-error: an invalid folder shows cause and fix, and start stays disabled', async () => {
     test.skip(phase !== 'error', 'LIVE_RC_PHASE=error のときだけ');
     const page = await connect();
+    await page.getByTestId('nav-home').click();
     await expect(page.getByTestId('screen-home')).toBeVisible({ timeout: 60_000 });
     await expect(page.getByTestId('env-status')).toBeVisible({ timeout: 180_000 });
     await page.getByTestId('project-path').fill('C:\\Windows\\Temp');
@@ -89,7 +98,7 @@ test.describe('RC: packaged app (GUI error / stop / restart)', () => {
     await expect(page.getByTestId('project-status')).toContainText('利用可能', { timeout: 60_000 });
     await page.getByTestId('request').fill('README.md に「使い方」セクションを追加して、greet 関数の使用例を 1 つ書いてください。');
     await page.getByTestId('start').click();
-    await expect(page.getByTestId('screen-interview')).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByTestId('screen-interview')).toBeVisible({ timeout: 180_000 }); // draft 作成（調査 + 最初の質問）は 1 分を超えることがある
     for (let round = 0; round < 6; round++) {
       const outcome = await Promise.race([
         page.getByTestId('approve-section').waitFor({ state: 'visible', timeout: 300_000 }).then(() => 'summary' as const),

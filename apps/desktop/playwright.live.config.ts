@@ -14,5 +14,6 @@ export default defineConfig({
   retries: 0,
   timeout: 60 * 60 * 1000,
   reporter: [['list'], ['json', { outputFile: 'test-results/playwright-live.json' }]],
-  use: { trace: 'retain-on-failure' }
+  // actionTimeout を設定しないと click/check/innerText が無期限に待ち、原因が分からないまま 1 時間のテストタイムアウトになる（v0.2.2 検証で発生）
+  use: { trace: 'retain-on-failure', screenshot: 'only-on-failure', actionTimeout: 60_000, navigationTimeout: 60_000 }
 });

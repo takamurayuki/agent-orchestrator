@@ -53,3 +53,16 @@ NSIS インストーラは `externalBin` のサイドカーを `agent-orchestrat
 - 検証ジョブは順次実行する: `CI=1 RUN_DOCKER_TESTS=1 pnpm vitest run` → `pnpm test:e2e`（Playwright）→ LIVE。Docker テストと Playwright を同時に走らせると WebServer（vite）がメモリ不足で落ちることがある。
 - サンドボックスイメージは配布物に含まれないが、初回起動時にアプリの「サンドボックスを準備する」から取得・ビルド・検証できる（`docker/manifest.json` のピン留め）。ベースイメージを更新するときは manifest の `baseDigest` を更新し、`pnpm sandbox:build --force` と `node scripts/gen-sandbox-assets.mjs`（runner の build に含まれる）で埋め込みを更新する。
 - 一般公開版に進む条件: コード署名（§3）、クリーン環境（別 PC / VM）での検証。
+
+## 6. 現在の配布物（v0.2.2 時点、未署名 RC）
+
+| 項目 | 値 |
+|---|---|
+| インストーラ | `apps/desktop/src-tauri/target/release/bundle/nsis/Agent Orchestrator_0.1.0_x64-setup.exe`（26,507,611 バイト = 25.28 MiB。配布版検証で見つけた不具合の修正後に再ビルドした最終版） |
+| SHA-256 | `BDB48173CBE61F76B9CA49F2E8EBA89A0C88CA31DF384FE24391E579DD5E17BC`（検証途中のビルド: `E2131B92…97BDF` → `38DF8E25…1ED87` → `59911DBE…1D937` → 最終） |
+| 同梱サイドカー | `agent-orchestrator-runner.exe`（Node SEA、105,828,864 バイト、SHA-256 `8061F053B01D706B2B10A82AEA75FB24C469D21957840DFE72AEFBB868F0C98F`） |
+| コード署名 | **未署名**（`Get-AuthenticodeSignature` = NotSigned）。一般公開不可、配布先は社内検証に限定 |
+| 製品バージョン文字列 | `0.1.0` のまま（`tauri.conf.json` / package.json / サンドボックスイメージのラベル `dev.agent-orchestrator.version` と連動するため、v0.2.x では意図的に変更していない。公開版で一括して更新する） |
+| 検証記録 | `docs/V022_VERIFICATION.md` §4（同一 PC・Node / pnpm 非搭載 PATH・空の app-data での実測。クリーン VM は未検証） |
+
+ビルド所要時間（本 PC）: `pnpm build` + サイドカー 約 30 秒、`tauri build` 334 秒（Rust のフルビルド時。フロントエンドのみの変更では約 3 分）。

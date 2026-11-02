@@ -478,6 +478,22 @@ export class MockTransport implements Transport {
           : [],
         requirementsUnverified: unverified,
         scopeCheck: null,
+        failureDiagnosis: needsHuman
+          ? {
+              category: 'limit_reached',
+              confidence: 'confirmed',
+              whatHappened: 'AI レビューの指摘が修正上限（3 回）内に解消しませんでした。検証コマンドはすべて成功しています。',
+              impact: '変更は途中の状態で作業用コピーに残っています。そのまま取り込まないでください。',
+              autoRecoverable: 'no',
+              autoRecoveryNote: '指摘は毎ラウンド AI に差し戻しています。上限を超えたため人の判断が必要です。',
+              nextSteps: ['「未解決の指摘」を確認し、妥当なら開発者に修正を依頼する', '指摘が要件の解釈違いなら、依頼内容を具体的にして新しい依頼を作る'],
+              evidence: ['[high] src/server/export/csv.ts:2 BOM が文字列連結で付与されているが、ストリーミング出力経路（exportLarge）では付与されていない。']
+            }
+          : run.state === 'PRECHECK_FAILED'
+          ? { category: 'precheck', confidence: 'confirmed', whatHappened: '実行前の確認で問題が見つかったため、AI は実行していません。', impact: 'プロジェクトは変わっていません。', autoRecoverable: 'no', autoRecoveryNote: '環境を整えてから再実行してください。', nextSteps: ['「問題の内容」の対処に従って環境を整える', 'ホーム画面のセットアップチェックで確認してから新しい依頼を作る'], evidence: [] }
+          : run.state === 'INTERRUPTED'
+          ? { category: 'cancelled', confidence: 'confirmed', whatHappened: '利用者の操作で実行を止めました。', impact: '変更は途中の状態で作業用コピーに残っています。そのまま取り込まないでください。', autoRecoverable: 'no', autoRecoveryNote: '自動では再開しません。', nextSteps: ['途中の変更が必要なければ作業用コピーを無視して新しい依頼を作る'], evidence: [] }
+          : null,
         reportPath: `${run.runDir}\\report.md`,
         worktreePath: run.worktreePath
       };

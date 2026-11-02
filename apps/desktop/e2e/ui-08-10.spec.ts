@@ -3,7 +3,7 @@ import { REQUEST, VALID_PROJECT, approve, expectFocusRing, gotoHome, reachApprov
 
 test.describe('UI-08 承認後', () => {
   test('UI-08: 承認すると task.yaml が固定され Run 画面へ遷移し、実行が COMPLETED まで進む', async ({ page }) => {
-    await reachApproval(page, { mockDelay: '250' });
+    await reachApproval(page, { mockDelay: '700' });
     await approve(page);
 
     await expect(page.getByTestId('nav-running')).toHaveAttribute('aria-current', 'page');

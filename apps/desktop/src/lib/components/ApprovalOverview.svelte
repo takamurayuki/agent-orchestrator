@@ -66,7 +66,16 @@
     {:else}
       <ul data-testid="overview-generated-artifacts">
         {#each p.generatedArtifacts as g, i (i)}
-          <li><code>{g.path}</code> ← <code>pnpm run {g.script}</code><span class="small muted">（{g.reason}）</span></li>
+          <li>
+            <code>{g.path}</code> ← <code>pnpm run {g.script}</code><span class="small muted">（{g.reason}）</span>
+            {#if g.inputStatus === 'missing'}
+              <div class="small" data-testid="generated-input-status" data-status="missing"><strong>注意:</strong> 生成スクリプトの入力 {(g.inputs ?? []).filter((x) => x.status === 'ignored' || x.status === 'missing').map((x) => x.path).join(', ')} は Git 管理外で、隔離環境にはありません。再生成の最新性だけを検証し、内容の妥当性は未確認になります。</div>
+            {:else if g.inputStatus === 'unknown'}
+              <div class="small muted" data-testid="generated-input-status" data-status="unknown">入力の依存関係は静的に確定できませんでした（確認方法: 生成スクリプトが読むファイルが Git 管理下か確認する）。</div>
+            {:else if g.inputStatus === 'ok'}
+              <div class="small muted" data-testid="generated-input-status" data-status="ok">入力はすべて Git 管理下です。</div>
+            {/if}
+          </li>
         {/each}
       </ul>
       <p class="small muted">AI がスクリプトを実行して更新し、検証で再実行して最新であることを確認します。</p>

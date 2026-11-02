@@ -1,4 +1,4 @@
-import type { AskedQuestion, DecisionRecord, Fact, GeneratedArtifact, TaskProposal } from '@agent-orchestrator/contracts';
+import type { AskedQuestion, DecisionRecord, Fact, GeneratedArtifact, GeneratedInput, TaskProposal } from '@agent-orchestrator/contracts';
 
 /**
  * 生成物（スクリプトで再生成されるファイル）の扱い（v0.2.1、D-41）。
@@ -9,6 +9,9 @@ import type { AskedQuestion, DecisionRecord, Fact, GeneratedArtifact, TaskPropos
  */
 export const GENERATION_QUESTION_PREFIX = 'GEN-';
 export const MANUAL_GENERATION = 'manual';
+/** 入力不足の確認質問（v0.2.2、D-42） */
+export const INPUT_QUESTION_PREFIX = 'GENIN-';
+export const PROCEED_WITHOUT_INPUTS = 'proceed';
 
 const SCRIPT_NAME_RE = /(^|[:_-])(gen|generate|report|docs?|schema|build:docs|codegen|snapshot|export)([:_-]|$)/i;
 const OUTPUT_TOKEN_RE = /(?:^|\s|=|'|")((?:[\w.-]+\/)*[\w.-]+\.(?:md|json|ya?ml|ts|js|mjs|txt|csv|html|svg))(?=\s|$|'|")/g;
@@ -70,6 +73,171 @@ export function generationFacts(candidates: readonly GenerationCandidate[], hint
   return facts;
 }
 
+// ---- 生成スクリプトの入力依存の静的解析（v0.2.2、D-42） ----
+// node スクリプトのソースから fs 呼び出しの引数（文字列リテラル / join(...) / 'dir/' + x / 代入された識別子）を解決し、
+// 読み込み先と書き込み先を分ける。動的に決まるパスは dynamic=true として「確定できない」扱いにする。推測で埋めない。
+
+export interface GeneratorPaths {
+  reads: string[];
+  writes: string[];
+  dynamic: boolean;
+}
+
+export interface GeneratorAnalysis extends GeneratorPaths {
+  script: string;
+  /** 解析したスクリプトファイル（package.json の command が `node <file>` のとき）。無ければ解析不能 */
+  file: string | null;
+  inputs: GeneratedInput[];
+}
+
+const READ_FNS = new Set(['readFileSync', 'readdirSync', 'existsSync', 'statSync', 'lstatSync', 'readFile', 'readdir', 'createReadStream', 'stat', 'access', 'accessSync', 'opendirSync']);
+const WRITE_FNS = new Set(['writeFileSync', 'writeFile', 'mkdirSync', 'mkdir', 'appendFileSync', 'appendFile', 'copyFileSync', 'rmSync', 'unlinkSync', 'createWriteStream']);
+const FS_CALL = /\b(readFileSync|readdirSync|existsSync|statSync|lstatSync|readFile|readdir|createReadStream|stat|access|accessSync|opendirSync|writeFileSync|writeFile|mkdirSync|mkdir|appendFileSync|appendFile|copyFileSync|rmSync|unlinkSync|createWriteStream)\(\s*((?:[^,()]|\([^()]*\))*)/g;
+const ASSIGN = /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*([^;\n]+)/g;
+
+function normalizePath(p: string): string | null {
+  const n = p.replace(/\\/g, '/').replace(/\/+/g, '/').replace(/^\.\//, '').replace(/\/$/, '');
+  if (!n || n === '.' || n === '..' || n.startsWith('node:') || /^[a-z]+:\/\//i.test(n)) return null;
+  return n;
+}
+
+/** 式を静的なパスに解決する。識別子は代入表から（深さ 3 まで）。解決できなければ null */
+function resolvePath(expr: string, assigns: Map<string, string>, depth = 0): string | null {
+  const t = expr.trim();
+  if (!t || depth > 3) return null;
+  const join = /^(?:path\.)?(?:join|resolve)\((.*)\)$/s.exec(t);
+  if (join) {
+    const args = splitArgs(join[1]!);
+    const parts: string[] = [];
+    for (let i = 0; i < args.length; i++) {
+      const a = args[i]!.trim();
+      const lit = /^'([^']*)'$|^"([^"]*)"$/.exec(a);
+      if (lit) {
+        const v = lit[1] ?? lit[2] ?? '';
+        if (v && v !== '.' && v !== '..') parts.push(v);
+        continue;
+      }
+      if (i === 0) {
+        // 先頭の識別子（root / dir 等）は代入表で解決できれば接頭辞、できなければ基準ディレクトリとみなす
+        const r = /^[A-Za-z_$][\w$]*$/.test(a) ? resolvePath(assigns.get(a) ?? '', assigns, depth + 1) : null;
+        if (r) parts.push(r);
+        continue;
+      }
+      break; // 途中の動的要素以降は確定できない（接頭辞までを入力とみなす）
+    }
+    return parts.length ? normalizePath(parts.join('/')) : null;
+  }
+  const concat = /^(?:'([^']*)'|"([^"]*)")\s*\+/.exec(t);
+  if (concat) return normalizePath((concat[1] ?? concat[2] ?? '').replace(/\/[^/]*$/, (m) => (m.endsWith('/') ? '' : m)).replace(/\/$/, ''));
+  const lit = /^'([^']*)'$|^"([^"]*)"$/.exec(t);
+  if (lit) return normalizePath(lit[1] ?? lit[2] ?? '');
+  if (/^[A-Za-z_$][\w$]*$/.test(t)) {
+    const a = assigns.get(t);
+    return a ? resolvePath(a, assigns, depth + 1) : null;
+  }
+  return null;
+}
+
+function splitArgs(s: string): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let cur = '';
+  let quote: string | null = null;
+  for (const ch of s) {
+    if (quote) {
+      cur += ch;
+      if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === "'" || ch === '"' || ch === '`') quote = ch;
+    if (ch === '(') depth++;
+    if (ch === ')') depth--;
+    if (ch === ',' && depth === 0) {
+      out.push(cur);
+      cur = '';
+      continue;
+    }
+    cur += ch;
+  }
+  if (cur.trim()) out.push(cur);
+  return out;
+}
+
+export function extractGeneratorPaths(source: string): GeneratorPaths {
+  const assigns = new Map<string, string>();
+  for (const m of source.matchAll(ASSIGN)) assigns.set(m[1]!, m[2]!.trim());
+  const reads = new Set<string>();
+  const writes = new Set<string>();
+  let dynamic = false;
+  for (const m of source.matchAll(FS_CALL)) {
+    const fn = m[1]!;
+    const arg = m[2]!.trim();
+    if (!arg) continue;
+    const p = resolvePath(arg, assigns);
+    if (WRITE_FNS.has(fn)) {
+      if (p) writes.add(p);
+      continue;
+    }
+    if (!READ_FNS.has(fn)) continue;
+    if (p) reads.add(p);
+    else dynamic = true;
+  }
+  for (const w of writes) reads.delete(w);
+  // 書き込み先の配下にある読み込みも出力扱い（レポートの再読込など）
+  return { reads: [...reads].sort(), writes: [...writes].sort(), dynamic };
+}
+
+/** 入力の分類から生成物の inputStatus を決める */
+export function summarizeInputStatus(analysis: GeneratorAnalysis | undefined): { inputs: GeneratedInput[]; inputStatus: 'ok' | 'missing' | 'unknown' } {
+  if (!analysis || analysis.file === null) return { inputs: [], inputStatus: 'unknown' };
+  const inputs = [...analysis.inputs];
+  if (analysis.dynamic) inputs.push({ path: '(実行時に決まるパス)', status: 'unknown', detail: '静的解析では入力を確定できません' });
+  const missing = inputs.some((i) => i.status === 'ignored' || i.status === 'missing');
+  return { inputs, inputStatus: missing ? 'missing' : inputs.some((i) => i.status === 'unknown') ? 'unknown' : 'ok' };
+}
+
+/** 素案の各生成物に入力の分類を付ける（モデルの出力は無視し、調査結果で上書きする） */
+export function attachGeneratorInputs(proposal: TaskProposal, generators: Record<string, GeneratorAnalysis>): TaskProposal {
+  return { ...proposal, generatedArtifacts: proposal.generatedArtifacts.map((a) => ({ ...a, ...summarizeInputStatus(generators[a.script]) })) };
+}
+
+export function generatorInputFacts(analyses: readonly GeneratorAnalysis[]): Fact[] {
+  const facts: Fact[] = [];
+  for (const g of analyses) {
+    const missing = g.inputs.filter((i) => i.status === 'ignored' || i.status === 'missing');
+    if (missing.length > 0) facts.push({ key: 'generation.input', value: `${g.script}（${g.file}）は Git 管理外の入力を読む: ${missing.map((i) => `${i.path}（${i.detail}）`).join('、')}。隔離ワークスペースはコミット内容から作られるため、入力なしで実行される`, source: g.file ?? 'package.json#scripts', confidence: 'confirmed' });
+    else if (g.dynamic) facts.push({ key: 'generation.input', value: `${g.script}（${g.file}）の入力は実行時に決まり、静的には確定できない（Git 追跡の入力: ${g.inputs.map((i) => i.path).join(', ') || 'なし'}）`, source: g.file ?? 'package.json#scripts', confidence: 'inferred' });
+  }
+  return facts;
+}
+
+/** 入力が Git 管理外の生成物について、承認前に尋ねる blocking 質問。既に判断済み（proceed）の生成物は除く */
+export function inputQuestions(artifacts: readonly GeneratedArtifact[], decisions: readonly DecisionRecord[], round: number): AskedQuestion[] {
+  const decided = new Set<string>();
+  for (const d of decisions) {
+    if (d.status !== 'active' || !d.topicKey.startsWith(INPUT_QUESTION_PREFIX)) continue;
+    const m = /生成物「([^」]+)」/.exec(d.question);
+    if (m) decided.add(m[1]!);
+  }
+  return artifacts
+    .filter((a) => a.inputStatus === 'missing' && !decided.has(a.path))
+    .slice(0, 3)
+    .map((a, i) => {
+      const missing = (a.inputs ?? []).filter((x) => x.status === 'ignored' || x.status === 'missing');
+      return {
+        id: `${INPUT_QUESTION_PREFIX}${round}-${i + 1}`,
+        round,
+        question: `【生成物の入力確認】生成物「${a.path}」の生成スクリプト「${a.script}」は Git 管理外の入力を読みます: ${missing.map((x) => `${x.path}（${x.detail}）`).join('、')}。隔離ワークスペースにはこれらが無いため、再生成すると内容が変わる（空になる）可能性があります。どうしますか？`,
+        decisionImpact: 'blocking' as const,
+        options: [
+          { value: MANUAL_GENERATION, label: '生成物の更新は今回の対象外にする（人が入力のある環境で更新する）' },
+          { value: PROCEED_WITHOUT_INPUTS, label: '入力なしで再生成する（最新性は検証するが、内容の妥当性は未確認として記録する）' }
+        ],
+        recommendation: '入力が無いと内容が空になるレポート等は「対象外」を推奨。入力が無くても正しい内容になる場合だけ続行してください'
+      };
+    });
+}
+
 /** 素案の generatedArtifacts のうち、script が package.json に無いもの */
 export function unknownGenerationScripts(artifacts: readonly GeneratedArtifact[], scripts: Record<string, string>): GeneratedArtifact[] {
   return artifacts.filter((a) => typeof scripts[a.script] !== 'string');
@@ -90,24 +258,34 @@ export function generationQuestions(unknown: readonly GeneratedArtifact[], candi
   }));
 }
 
-/** GEN- 質問への判断を素案に適用する（script の差し替え / 手動更新なら除外）。判断が無い項目はそのまま */
+/** GEN- / GENIN- 質問への判断を素案に適用する（script の差し替え / 手動更新なら除外 / 入力なしで続行なら未解決事項に記録）。判断が無い項目はそのまま */
 export function applyGenerationDecisions(proposal: TaskProposal, decisions: readonly DecisionRecord[]): TaskProposal {
-  const byPath = new Map<string, string>();
+  const scriptByPath = new Map<string, string>();
+  const inputByPath = new Map<string, string>();
   for (const d of decisions) {
-    if (d.status !== 'active' || !d.topicKey.startsWith(GENERATION_QUESTION_PREFIX)) continue;
+    if (d.status !== 'active') continue;
     const m = /生成物「([^」]+)」/.exec(d.question);
-    if (m) byPath.set(m[1]!, d.chosen);
+    if (!m) continue;
+    if (d.topicKey.startsWith(GENERATION_QUESTION_PREFIX)) scriptByPath.set(m[1]!, d.chosen);
+    else if (d.topicKey.startsWith(INPUT_QUESTION_PREFIX)) inputByPath.set(m[1]!, d.chosen);
   }
-  if (byPath.size === 0) return proposal;
+  if (scriptByPath.size === 0 && inputByPath.size === 0) return proposal;
   const artifacts: GeneratedArtifact[] = [];
   const outOfScope = [...proposal.outOfScope];
+  const openItems = [...proposal.openItems];
   for (const a of proposal.generatedArtifacts) {
-    const chosen = byPath.get(a.path);
-    if (chosen === undefined) artifacts.push(a);
-    else if (chosen === MANUAL_GENERATION) {
-      const note = `生成物 ${a.path} の更新（人が後で行う）`;
+    const chosenScript = scriptByPath.get(a.path);
+    const chosenInput = inputByPath.get(a.path);
+    if (chosenScript === MANUAL_GENERATION || chosenInput === MANUAL_GENERATION) {
+      const note = `生成物 ${a.path} の更新（人が後で行う${chosenInput === MANUAL_GENERATION ? '。生成スクリプトの入力が Git 管理外のため' : ''}）`;
       if (!outOfScope.includes(note)) outOfScope.push(note);
-    } else artifacts.push({ ...a, script: chosen });
+      continue;
+    }
+    if (chosenInput === PROCEED_WITHOUT_INPUTS) {
+      const note = `生成物 ${a.path} は入力が Git 管理外のため、再生成の最新性だけを検証し、内容の妥当性は未確認（利用者の判断で続行）`;
+      if (!openItems.includes(note)) openItems.push(note);
+    }
+    artifacts.push(chosenScript !== undefined ? { ...a, script: chosenScript } : a);
   }
-  return { ...proposal, generatedArtifacts: artifacts, outOfScope };
+  return { ...proposal, generatedArtifacts: artifacts, outOfScope, openItems };
 }

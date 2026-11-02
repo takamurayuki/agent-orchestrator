@@ -6,7 +6,7 @@ import { detectProhibitedOperations } from '../policy.js';
 import type { Repository, DraftRow } from '../storage/repository.js';
 import { checkProfileReadiness } from '../verification/profiles.js';
 import { activeDecisions, decisionFromContradiction, decisionFromInterviewAnswer, decisionsFromRevision, makeDecision, resolveConflicts, retractDecision } from './decisions.js';
-import { applyGenerationDecisions, detectGenerationScripts, generationQuestions, unknownGenerationScripts } from './generated.js';
+import { applyGenerationDecisions, attachGeneratorInputs, detectGenerationScripts, generationQuestions, inputQuestions, unknownGenerationScripts } from './generated.js';
 import { analyzeContradictions, analyzeGap, contradictionsToQuestions, validateProposal, type InterviewModel } from './gap-analyzer.js';
 import { previousAnsweredRound, validateAnswers, type AnswerInput } from './questions.js';
 import { renderDigest, type RepoDigest, type RepoInspector } from './repo-inspector.js';
@@ -260,7 +260,9 @@ export class DraftService {
     }
     // 生成物（v0.2.1、D-41）: GEN- 質問への判断を素案に適用し、生成手段が不明なものは推測せず承認前に尋ねる
     const scriptsMap = Object.fromEntries(Object.entries(ctx.digest.packageJson?.scripts ?? {}).filter(([, v]) => typeof v === 'string')) as Record<string, string>;
-    const validated = { ok: true as const, value: applyGenerationDecisions(validatedRaw.value, activeDecisions(this.deps.repo.listDecisions(draft.id))) };
+    const activeGen = activeDecisions(this.deps.repo.listDecisions(draft.id));
+    // 入力の分類（v0.2.2、D-42）を付けてから判断を適用する（script の差し替え → 対象外 / 入力なしで続行）
+    const validated = { ok: true as const, value: applyGenerationDecisions(attachGeneratorInputs(applyGenerationDecisions(validatedRaw.value, activeGen), ctx.digest.generators ?? {}), activeGen) };
     const unknownGen = unknownGenerationScripts(validated.value.generatedArtifacts, scriptsMap);
     if (unknownGen.length > 0) {
       const nextRound = round + 1;
@@ -270,6 +272,19 @@ export class DraftService {
         return this.view(draft);
       }
       this.deps.repo.addQuestions(draft.id, questions);
+      this.contexts.set(draft.id, { ...ctx, pendingProposal: validated.value });
+      draft = this.deps.repo.updateDraft(draft.id, { state: 'ASKING', round: nextRound, summary: a.interview.summary });
+      return this.view(draft);
+    }
+    // 入力が Git 管理外の生成物（v0.2.2、D-42）: 隔離ワークスペースでは再現できないため、承認前に利用者の判断を求める（推測で続行しない）
+    const inputQs = inputQuestions(validated.value.generatedArtifacts, activeGen, round + 1);
+    if (inputQs.length > 0) {
+      const nextRound = round + 1;
+      if (asked.length + inputQs.length > 15 || nextRound > 5) {
+        draft = this.deps.repo.updateDraft(draft.id, { state: 'BLOCKED', blockedReason: `生成物の入力不足が未解決のまま質問上限に達しました: ${validated.value.generatedArtifacts.filter((a) => a.inputStatus === 'missing').map((a) => a.path).join(' / ')}` });
+        return this.view(draft);
+      }
+      this.deps.repo.addQuestions(draft.id, inputQs);
       this.contexts.set(draft.id, { ...ctx, pendingProposal: validated.value });
       draft = this.deps.repo.updateDraft(draft.id, { state: 'ASKING', round: nextRound, summary: a.interview.summary });
       return this.view(draft);

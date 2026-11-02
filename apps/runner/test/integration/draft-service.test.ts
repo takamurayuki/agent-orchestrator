@@ -375,7 +375,7 @@ describe('DraftService conversation state machine (SPEC §5)', () => {
       await expect(svc.approve({ draftId: view.id, revision: view.revision, acknowledgeDataSharing: true })).rejects.toMatchObject({ code: 'INVALID_STATE' });
       view = await svc.answer({ draftId: view.id, answers: [{ questionId: 'GEN-2-1', value: 'quality:report', skipped: false }] });
       expect(view.state, view.blockedReason ?? view.validationErrors.join('; ')).toBe('AWAITING_APPROVAL');
-      expect(view.proposal?.generatedArtifacts).toEqual([{ path: 'docs/QUALITY_REPORT.md', script: 'quality:report', reason: '生成器を変更するため' }]);
+      expect(view.proposal?.generatedArtifacts).toMatchObject([{ path: 'docs/QUALITY_REPORT.md', script: 'quality:report', reason: '生成器を変更するため' }]);
       expect(view.taskYaml).toContain('generatedArtifacts:');
       expect(view.taskYaml).toContain('script: quality:report');
       expect(view.decisions.map((d) => d.topicKey)).toEqual(['GEN-2-1']);
@@ -393,6 +393,53 @@ describe('DraftService conversation state machine (SPEC §5)', () => {
       expect(view.proposal?.generatedArtifacts).toEqual([]);
       expect(view.proposal?.outOfScope).toContain('生成物 docs/QUALITY_REPORT.md の更新（人が後で行う）');
       expect(view.taskYaml).not.toContain('generatedArtifacts:');
+    });
+
+    it('v0.2.2 (D-42): a generator that reads gitignored inputs is reported as a fact and asked before approval; manual drops it, proceed records the validity caveat', async () => {
+      writeFileSync(join(repo, 'package.json'), JSON.stringify({ name: 'demo', scripts: { typecheck: 'tsc', lint: 'eslint .', 'test:run': 'vitest run', 'report:gen': 'node scripts/gen-report.mjs' }, dependencies: { svelte: '^5' } }));
+      mkdirSync(join(repo, 'scripts'), { recursive: true });
+      mkdirSync(join(repo, 'docs'), { recursive: true });
+      mkdirSync(join(repo, 'data'), { recursive: true });
+      writeFileSync(join(repo, '.gitignore'), 'data/\n');
+      writeFileSync(join(repo, 'data', 'a.json'), '{}');
+      writeFileSync(join(repo, 'scripts', 'gen-report.mjs'), "import { readdirSync, readFileSync, writeFileSync } from 'node:fs';\nimport { join } from 'node:path';\nconst dir = join('data');\nconst n = readdirSync(dir).length;\nconst cfg = readFileSync('package.json', 'utf8');\nwriteFileSync('docs/REPORT.md', '# ' + n + cfg.length);\n");
+      writeFileSync(join(repo, 'docs', 'REPORT.md'), '<!-- 自動生成: scripts/gen-report.mjs -->\n# 1\n');
+      git(repo, 'add', '-A');
+      git(repo, 'commit', '-q', '-m', 'report');
+      const proposalWithReport = { ...defaultProposal, generatedArtifacts: [{ path: 'docs/REPORT.md', script: 'report:gen', reason: '生成器を変更' }] };
+      const svc = service(new ScriptedModel([done], proposalWithReport));
+      let view = await svc.create({ projectPath: repo, request: 'レポートに列を追加' });
+      expect(view.facts.some((f) => f.key === 'generation.input' && f.value.includes('data') && f.confidence === 'confirmed')).toBe(true);
+      expect(view.state).toBe('ASKING');
+      expect(view.currentQuestions.map((x) => x.id)).toEqual(['GENIN-2-1']);
+      expect(view.currentQuestions[0]!.question).toContain('data（.gitignore 対象');
+      expect(view.currentQuestions[0]!.options.map((o) => o.value)).toEqual(['manual', 'proceed']);
+      await expect(svc.approve({ draftId: view.id, revision: view.revision, acknowledgeDataSharing: true })).rejects.toMatchObject({ code: 'INVALID_STATE' });
+      // proceed: 生成物は残り、入力の分類と未確認の注記が task.yaml に入る
+      view = await svc.answer({ draftId: view.id, answers: [{ questionId: 'GENIN-2-1', value: 'proceed', skipped: false }] });
+      expect(view.state, view.blockedReason ?? view.validationErrors.join('; ')).toBe('AWAITING_APPROVAL');
+      expect(view.proposal?.generatedArtifacts[0]).toMatchObject({ path: 'docs/REPORT.md', inputStatus: 'missing' });
+      expect(view.proposal?.generatedArtifacts[0]?.inputs?.map((i) => [i.path, i.status])).toEqual([['data', 'ignored'], ['package.json', 'tracked']]);
+      expect(view.proposal?.openItems.some((o) => o.includes('内容の妥当性は未確認'))).toBe(true);
+      expect(view.taskYaml).toContain('inputStatus: missing');
+      // manual（別ドラフト）: 生成物が外れ、対象外に記録される
+      const svc2 = service(new ScriptedModel([done], proposalWithReport));
+      let v2 = await svc2.create({ projectPath: repo, request: 'レポートに列を追加' });
+      v2 = await svc2.answer({ draftId: v2.id, answers: [{ questionId: 'GENIN-2-1', value: 'manual', skipped: false }] });
+      expect(v2.state, v2.blockedReason ?? v2.validationErrors.join('; ')).toBe('AWAITING_APPROVAL');
+      expect(v2.proposal?.generatedArtifacts).toEqual([]);
+      expect(v2.proposal?.outOfScope.some((o) => o.includes('入力が Git 管理外'))).toBe(true);
+    });
+
+    it('v0.2.2 (D-42): a generator whose inputs are all tracked needs no input question and is marked ok', async () => {
+      withReportScript();
+      writeFileSync(join(repo, 'scripts', 'quality-report.mjs'), "import { readFileSync, writeFileSync } from 'node:fs';\nconst pkg = readFileSync('package.json', 'utf8');\nwriteFileSync('docs/QUALITY_REPORT.md', '# ' + pkg.length);\n");
+      git(repo, 'add', '-A');
+      git(repo, 'commit', '-q', '-m', 'gen');
+      const view = await service(new ScriptedModel([done], { ...guessed, generatedArtifacts: [{ ...guessed.generatedArtifacts[0]!, script: 'quality:report' }] })).create({ projectPath: repo, request: 'x' });
+      expect(view.state, view.blockedReason ?? view.validationErrors.join('; ')).toBe('AWAITING_APPROVAL');
+      expect(view.proposal?.generatedArtifacts[0]).toMatchObject({ inputStatus: 'ok' });
+      expect(view.facts.some((f) => f.key === 'generation.input')).toBe(false);
     });
 
     it('a script that exists in package.json needs no question', async () => {

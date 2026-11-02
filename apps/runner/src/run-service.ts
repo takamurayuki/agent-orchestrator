@@ -7,6 +7,7 @@ import { NEXT_ACTIONS, RunEngine, type ApprovedTaskSnapshot, type EngineDeps } f
 import { excerpt, maskSecrets } from './masking.js';
 import type { SandboxExecutor } from './isolation/types.js';
 import { renderReport } from './report.js';
+import { diagnoseFailure } from './failure-diagnosis.js';
 import { parseAndValidateTaskYaml } from './requirements/task-generator.js';
 import type { FileAndDbRecorder } from './storage/recorder.js';
 import type { Repository } from './storage/repository.js';
@@ -194,6 +195,7 @@ export class RunService {
     const diffExcerpt = excerpt(maskSecrets(diff), 200_000);
     const lastReview = [...rounds].reverse().find((r) => r.review?.parsed)?.review?.parsed ?? null;
     const blocking = new Set((this.deps.repo.getApprovedTask(run.approvedTaskId)?.task.review?.blockingSeverities ?? ['critical', 'high']) as string[]);
+    const egress = summarizeEgress(join(run.runDir, 'egress.jsonl'));
     const openFindings = run.state === 'COMPLETED' ? [] : (lastReview?.findings ?? []).filter((f) => blocking.has(f.severity) || lastReview?.verdict !== 'approved').map((f) => ({ id: f.id, severity: f.severity, file: f.file, line: f.line, description: f.description, recommendation: f.recommendation }));
     return {
       run,
@@ -205,9 +207,10 @@ export class RunService {
       requirementsUnverified: lastReview?.requirementsUnverified ?? [],
       reportPath,
       worktreePath: run.worktreePath,
-      egress: summarizeEgress(join(run.runDir, 'egress.jsonl')),
+      egress,
       policyFindings: last?.policyFindings ?? [],
-      scopeCheck: last?.scopeCheck ?? null
+      scopeCheck: last?.scopeCheck ?? null,
+      failureDiagnosis: diagnoseFailure({ run, rounds, egress })
     };
   }
 

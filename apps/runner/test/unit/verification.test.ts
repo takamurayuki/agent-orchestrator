@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { checkProfileReadiness, expectedCommandNames } from '../../src/verification/profiles.js';
-import { SandboxVerifier } from '../../src/verification/runner.js';
+import { INSTALL_TIMEOUT_FLOOR_MS, SandboxVerifier } from '../../src/verification/runner.js';
 import { FakeSandbox } from '../helpers/fake-sandbox.js';
 
 let dir: string;
@@ -48,6 +48,19 @@ describe('SandboxVerifier', () => {
     signal: new AbortController().signal,
     onLog: () => undefined,
     sandbox
+  });
+
+  it('gives the install step a 10-minute floor (network-bound dependency fetch) while other commands keep the configured timeout [v0.2.2]', async () => {
+    const sandbox = new FakeSandbox();
+    await new SandboxVerifier(sandbox).verify(input(sandbox));
+    const byName = Object.fromEntries(sandbox.steps.map((s) => [s.name.replace(/-r1$/, ''), s.timeoutMs]));
+    expect(byName['verify-install']).toBe(INSTALL_TIMEOUT_FLOOR_MS);
+    expect(byName['verify-typecheck']).toBe(1000);
+    expect(byName['verify-test-run']).toBe(1000);
+    // 設定が下限より長ければそのまま
+    const long = new FakeSandbox();
+    await new SandboxVerifier(long).verify({ ...input(long), timeoutMs: INSTALL_TIMEOUT_FLOOR_MS + 5000 });
+    expect(long.steps.find((s) => s.name.startsWith('verify-install'))!.timeoutMs).toBe(INSTALL_TIMEOUT_FLOOR_MS + 5000);
   });
 
   it('runs all commands in the sandbox sequentially and passes when all exit 0', async () => {

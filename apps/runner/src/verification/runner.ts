@@ -5,6 +5,9 @@ import { CONTAINER_WORKSPACE, type SandboxExecutor } from '../isolation/types.js
 import { verifyGeneratedArtifacts } from './generated.js';
 import { expectedCommandNames, getProfile } from './profiles.js';
 
+/** install（依存取得）の実行時間の下限。検証コマンド上限より短くはしない */
+export const INSTALL_TIMEOUT_FLOOR_MS = 10 * 60 * 1000;
+
 /**
  * Verifier。AI ではない。プロファイルのコマンドを隔離コンテナ内で逐次実行し、終了コード・タイムアウトを記録する。
  * 1 つでも失敗したら以降はスキップし（欠落として記録）、passed=false。
@@ -27,6 +30,10 @@ export class SandboxVerifier {
     const missing: string[] = [];
     let failed = false;
     const perCommandTimeout = Math.max(1000, Math.floor(input.timeoutMs));
+    // 依存関係の取得（install）はネットワーク依存で、Run ごとに新しいボリュームへ取り直すため 2〜5 分かかる（v0.2.2 配布版検証: 131〜302 秒）。
+    // 検証コマンドの上限（既定 300 秒）だけでは起動前検査で時間切れになりやすいので、install にだけ下限 10 分を与える。
+    // 隔離・ネットワーク制限は変えない（同じサンドボックス・同じ egress allowlist）。Run 全体の制限時間（maxDurationSeconds）は別途適用される
+    const installTimeout = Math.max(perCommandTimeout, INSTALL_TIMEOUT_FLOOR_MS);
     for (const cmd of profile.commands) {
       if (failed || input.signal.aborted) {
         missing.push(cmd.name);
@@ -42,7 +49,7 @@ export class SandboxVerifier {
         // pnpm store はワークスペースボリューム内（tmpfs の /tmp に大量書込しない。同期からは除外される）
         env: { ...this.extraEnv, CI: '1', FORCE_COLOR: '0', NODE_OPTIONS: '--max-old-space-size=2048', pnpm_config_store_dir: '/workspace/.pnpm-store', pnpm_config_cache_dir: '/workspace/.pnpm-store/cache', pnpm_config_manage_package_manager_versions: 'false', COREPACK_ENABLE_STRICT: '0', COREPACK_ENABLE_AUTO_PIN: '0' },
         network: cmd.network,
-        timeoutMs: perCommandTimeout,
+        timeoutMs: cmd.name === 'install' ? installTimeout : perCommandTimeout,
         signal: input.signal,
         onStdout: input.onLog,
         onStderr: input.onLog

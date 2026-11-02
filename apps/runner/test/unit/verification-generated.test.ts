@@ -48,6 +48,14 @@ describe('generated artifact verification (D-41)', () => {
     expect(to.steps.at(-1)!.name).toBe('generate-restore-r1');
   });
 
+  it('reports freshness only (not validity) when the inputs are outside git', async () => {
+    const sb = sandboxWith({ before: 'aaa', after: 'aaa' });
+    const r = await verifyGeneratedArtifacts(sb, { ...input(), artifacts: [{ ...artifact, inputStatus: 'missing', inputs: [{ path: 'test-results/dogfood', status: 'ignored', detail: 'd' }] }] });
+    expect(r[0]!.exitCode).toBe(0);
+    expect(r[0]!.stdoutExcerpt).toContain('内容の妥当性は未確認');
+    expect(r[0]!.stdoutExcerpt).toContain('test-results/dogfood');
+  });
+
   it('fails with a plain-language reason when the artifact is stale (Builder did not regenerate)', async () => {
     const r = await verifyGeneratedArtifacts(sandboxWith({ before: 'aaa', after: 'bbb' }), input());
     expect(r[0]!.exitCode).toBe(1);

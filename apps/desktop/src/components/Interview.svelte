@@ -42,6 +42,8 @@
   const blocking = $derived(draft?.blockingQuestions ?? []);
   const canGoBack = $derived((draft?.answers.length ?? 0) > 0 && !draft?.approved && app.busy === null);
   const asking = $derived(draft?.state === 'ASKING' && (draft?.currentQuestions.length ?? 0) > 0);
+  /** 回答後の再評価中（GAP_ANALYZING 等）: 質問も素案もまだ無い。承認セクションは出さない（v0.2.2 配布版検証で、再評価中に承認セクションが先に出て自動操作が誤動作した） */
+  const evaluating = $derived(!!draft && !asking && !draft.proposal && draft.state !== 'BLOCKED');
   const roundCount = $derived(draft ? Math.max(1, Math.ceil(draft.totalQuestionsAsked / 3), draft.round) : 1);
   const unresolvedContradictions = $derived(draft?.contradictions ?? []);
 
@@ -91,8 +93,12 @@
 {#if !draft}
   <div class="card" data-testid="screen-interview">
     <h1>ヒアリング</h1>
-    <p>まずホーム画面でプロジェクトと依頼内容を入力して「開始」を押してください。</p>
-    <button type="button" onclick={() => app.navigate('home')}>ホームへ</button>
+    {#if app.busy}
+      <p role="status" data-testid="draft-creating">{app.busy}中です。リポジトリを調べて最初の質問を用意しています（数十秒かかります）…</p>
+    {:else}
+      <p>まずホーム画面でプロジェクトと依頼内容を入力して「開始」を押してください。</p>
+      <button type="button" onclick={() => app.navigate('home')}>ホームへ</button>
+    {/if}
   </div>
 {:else}
   <div class="stack" data-testid="screen-interview">
@@ -158,8 +164,14 @@
           </section>
         {/if}
 
-        {#if !asking}
-          <!-- 1. 要件サマリー（平易な概要）を最初に -->
+        {#if evaluating}
+          <section class="card" role="status" data-testid="draft-evaluating">
+            <h2>要件を再評価しています</h2>
+            <p class="small muted">回答をもとにリポジトリの事実と照らし合わせ、次の質問または要件サマリーを用意しています（数十秒〜数分）。状態: {DRAFT_STATE_LABELS[draft.state] ?? draft.state}</p>
+          </section>
+        {/if}
+        {#if !asking && (draft.proposal || draft.state === 'BLOCKED')}
+          <!-- 1. 要件サマリー（平易な概要）を最初に。BLOCKED のときは承認できない理由を見せるために残す -->
           <ApprovalOverview {draft} />
 
           <!-- 2. 承認 -->
