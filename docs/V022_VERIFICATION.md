@@ -124,5 +124,6 @@
 
 - Vitest 261 passed / 0 failed / 8 skipped、Playwright 31 passed、受入 PASS 56 / FAIL 0 / NOT_RUN 0、tsc / svelte-check / eslint / cargo check クリーン。
 - 実 CLI の生データ: `test-results/dogfood/v022-*.json`（ローカルのみ）、配布版 GUI の記録: `.tmp/v022-gui*.log`、`.tmp/rc-v022-app-data`（ローカルのみ）。
-- コミット: 本ドキュメント末尾の追記を参照。
+- コミット: `3a7b11c`（実装・修正・検証記録）。本ドキュメントへのコミット SHA の追記はその直後のコミット。
 
+補足: 配布版検証の終盤、本 PC の CPU 負荷が 100% のままで、モック Playwright の画面遷移を待つ 2 件（UI-08 / UI-14a）が時間切れで落ちた。原因は他の作業の負荷で、両スペックの待ち時間を既定値相当に広げたうえで全 31 件 PASS を確認した（品質ルールの緩和ではなく、テストの待ち時間の調整）。
