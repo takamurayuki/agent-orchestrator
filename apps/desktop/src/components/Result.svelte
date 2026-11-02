@@ -65,7 +65,10 @@
 </script>
 
 <div class="stack" data-testid="screen-result">
-  <h1>結果・履歴</h1>
+  <header class="intro">
+    <span class="eyebrow">結果・履歴</span>
+    <h1>実行結果</h1>
+  </header>
   <div class="grid-2">
     <div class="stack">
       {#if !report || !outcome}
@@ -75,14 +78,15 @@
       {:else}
         {@const run = report.run}
         {@const unapprovedPolicy = report.policyFindings.filter((p) => !p.approved)}
-        <!-- 1. 結果の要約（平易な日本語） -->
-        <section class="card outcome {outcome.tone}" aria-labelledby="result-heading" data-testid="result-summary">
-          <p class="small muted">依頼: {run.taskTitle}</p>
-          <div class="row" style="justify-content: space-between; align-items: flex-start">
-            <h2 id="result-heading" data-testid="outcome-headline">{outcome.headline}</h2>
+
+        <!-- 1. 結果の要約（見出し 1 つ・主操作 1 つ） -->
+        <section class="card hero tone-{outcome.tone}" aria-labelledby="result-heading" data-testid="result-summary">
+          <p class="tiny muted">依頼: {run.taskTitle}</p>
+          <div class="row between" style="align-items: flex-start">
+            <h2 id="result-heading" class="headline" data-testid="outcome-headline">{outcome.headline}</h2>
             <StatusBadge label={runStateLabel(run.state)} code={run.state} tone={RUN_STATE_TONES[run.state]} testid="result-state" />
           </div>
-          <p data-testid="outcome-summary">{outcome.summary}</p>
+          <p class="lead" data-testid="outcome-summary">{outcome.summary}</p>
           {#if outcome.caution}
             <Alert tone="warning" role="status" title="取り込む前に確認してください" message={outcome.caution} testid="outcome-caution" />
           {/if}
@@ -92,31 +96,65 @@
             </div>
           {/if}
 
-          <dl class="guidance" data-testid="outcome-guidance">
-            <dt>何が起きたか</dt>
-            <dd>{outcome.guidance.cause}</dd>
-            <dt>変更の状態</dt>
-            <dd>{outcome.guidance.impact}</dd>
-            <dt>次にできること</dt>
-            <dd>
-              <ol>
-                {#each outcome.guidance.next as n, i (i)}
-                  <li>{n}</li>
-                {/each}
-              </ol>
-            </dd>
+          <dl class="guide" data-testid="outcome-guidance">
+            <div class="guide-item">
+              <dt>何が起きたか</dt>
+              <dd>{outcome.guidance.cause}</dd>
+            </div>
+            <div class="guide-item">
+              <dt>変更の状態</dt>
+              <dd>{outcome.guidance.impact}</dd>
+            </div>
+            <div class="guide-item">
+              <dt>次にできること</dt>
+              <dd>
+                <ol>
+                  {#each outcome.guidance.next as n, i (i)}
+                    <li>{n}</li>
+                  {/each}
+                </ol>
+              </dd>
+            </div>
           </dl>
-          {#if report.failureDiagnosis}
-            {@const d = report.failureDiagnosis}
-            <section class="diagnosis" aria-labelledby="failure-diagnosis-heading" data-testid="failure-diagnosis" data-category={d.category}>
-              <h3 id="failure-diagnosis-heading">停止理由の診断: {FAILURE_CATEGORY_LABELS[d.category]} <span class="small muted">（記録からの自動分類、確度: {CONFIDENCE_LABELS[d.confidence]}）</span></h3>
-              <dl class="guidance">
+
+          <div class="row actions" data-testid="result-actions">
+            {#if report.changedFiles.length > 0}
+              <button type="button" class="primary large" onclick={showChanges} data-testid="show-diff">変更内容を見る（{report.changedFiles.length} ファイル）</button>
+            {/if}
+            {#if report.worktreePath && canReveal}
+              <button type="button" onclick={() => void revealWorktree(report.worktreePath!)} data-testid="open-worktree">作業用コピーのフォルダーを開く</button>
+            {/if}
+            {#if report.worktreePath}
+              <button type="button" onclick={() => void copyText('作業用コピーのパス', report.worktreePath)} data-testid="copy-worktree">作業用コピーのパスをコピー</button>
+            {/if}
+            <button type="button" class="ghost" onclick={newRequest} data-testid="new-request">新しい依頼を作る</button>
+            {#if copied}<span class="small muted" role="status">{copied}をコピーしました</span>{/if}
+          </div>
+          <p class="tiny muted" data-testid="apply-note">
+            元のプロジェクトへの反映はこのアプリでは行いません（push / merge / deploy もしません）。取り込む場合は、作業用コピーのフォルダーをお使いの Git ツールで開き、内容を確認してから取り込んでください。
+          </p>
+        </section>
+
+        <!-- 1b. 停止理由の診断（記録からの分類） -->
+        {#if report.failureDiagnosis}
+          {@const d = report.failureDiagnosis}
+          <section class="card diagnosis" aria-labelledby="failure-diagnosis-heading" data-testid="failure-diagnosis" data-category={d.category}>
+            <span class="eyebrow">停止理由の診断（記録からの自動分類、確度: {CONFIDENCE_LABELS[d.confidence]}）</span>
+            <h3 id="failure-diagnosis-heading" class="diag-title">停止理由の診断: {FAILURE_CATEGORY_LABELS[d.category]}</h3>
+            <dl class="guide">
+              <div class="guide-item">
                 <dt>何が起きたか</dt>
                 <dd>{d.whatHappened}</dd>
+              </div>
+              <div class="guide-item">
                 <dt>開発結果への影響</dt>
                 <dd>{d.impact}</dd>
+              </div>
+              <div class="guide-item">
                 <dt>自動修復</dt>
                 <dd>{AUTO_RECOVERY_LABELS[d.autoRecoverable]}。{d.autoRecoveryNote}</dd>
+              </div>
+              <div class="guide-item">
                 <dt>次に取る操作</dt>
                 <dd>
                   <ol>
@@ -125,46 +163,29 @@
                     {/each}
                   </ol>
                 </dd>
-              </dl>
-              {#if d.evidence.length > 0}
-                <details>
-                  <summary>根拠（記録の抜粋）</summary>
-                  <ul class="small">
-                    {#each d.evidence as e, i (i)}
-                      <li><code>{e}</code></li>
-                    {/each}
-                  </ul>
-                </details>
-              {/if}
-            </section>
-          {/if}
-          {#if run.reasonDetail}
-            <Alert tone={RUN_STATE_TONES[run.state]} role="status" title={run.state === 'PRECHECK_FAILED' ? '問題の内容' : 'システムからの詳細'} message={run.reasonDetail} testid="result-reason-detail" />
-          {/if}
-
-          <div class="row actions" data-testid="result-actions">
-            {#if report.changedFiles.length > 0}
-              <button type="button" class="primary" onclick={showChanges} data-testid="show-diff">変更内容を見る（{report.changedFiles.length} ファイル）</button>
+              </div>
+            </dl>
+            {#if d.evidence.length > 0}
+              <details class="section">
+                <summary>根拠（記録の抜粋）</summary>
+                <ul class="small">
+                  {#each d.evidence as e, i (i)}
+                    <li><code>{e}</code></li>
+                  {/each}
+                </ul>
+              </details>
             {/if}
-            {#if report.worktreePath && canReveal}
-              <button type="button" onclick={() => void revealWorktree(report.worktreePath!)} data-testid="open-worktree">作業用コピーのフォルダーを開く</button>
-            {/if}
-            {#if report.worktreePath}
-              <button type="button" onclick={() => void copyText('作業用コピーのパス', report.worktreePath)} data-testid="copy-worktree">作業用コピーのパスをコピー</button>
-            {/if}
-            <button type="button" onclick={newRequest} data-testid="new-request">新しい依頼を作る</button>
-            {#if copied}<span class="small muted" role="status">{copied}をコピーしました</span>{/if}
-          </div>
-          <p class="small muted" data-testid="apply-note">
-            元のプロジェクトへの反映はこのアプリでは行いません（push / merge / deploy もしません）。取り込む場合は、作業用コピーのフォルダーをお使いの Git ツールで開き、内容を確認してから取り込んでください。
-          </p>
-        </section>
+          </section>
+        {/if}
+        {#if run.reasonDetail}
+          <Alert tone={RUN_STATE_TONES[run.state]} role="status" title={run.state === 'PRECHECK_FAILED' ? '問題の内容' : 'システムからの詳細'} message={run.reasonDetail} testid="result-reason-detail" />
+        {/if}
 
         <!-- 2. 未解決の指摘（原因・影響・次の操作） -->
         <section class="card" aria-labelledby="findings-heading">
           <h2 id="findings-heading">未解決の指摘（{report.openFindings.length}）／ 確認できなかった要件（{report.requirementsUnverified.length}）</h2>
           {#if report.openFindings.length === 0}
-            <p class="muted">未解決の指摘はありません。</p>
+            <p class="small muted">未解決の指摘はありません。</p>
           {:else}
             <ul class="findings" data-testid="open-findings">
               {#each report.openFindings as f (f.id)}
@@ -175,7 +196,7 @@
                     <strong>{f.id}</strong>
                     <code>{f.file}:{f.line}</code>
                   </div>
-                  <dl class="finding">
+                  <dl class="finding small">
                     <dt>原因</dt>
                     <dd>{f.description}</dd>
                     <dt>影響</dt>
@@ -189,7 +210,7 @@
           {/if}
           {#if report.requirementsUnverified.length > 0}
             <h3>レビューで確認できなかった要件</h3>
-            <p class="small muted">これらの要件は満たされているかどうか確認できていません。人が確認するまで完了と見なさないでください。</p>
+            <p class="tiny muted">これらの要件は満たされているかどうか確認できていません。人が確認するまで完了と見なさないでください。</p>
             <ul data-testid="requirements-unverified">
               {#each report.requirementsUnverified as r, i (i)}
                 <li>{r}</li>
@@ -219,7 +240,7 @@
           </section>
         {/if}
 
-        <!-- 3. ポリシー違反 -->
+        <!-- 3. ポリシー違反（あるときだけ目立たせる） -->
         {#if report.policyFindings.length > 0}
           <section class="card" aria-labelledby="policy-heading" data-testid="policy-findings">
             <h2 id="policy-heading">ポリシー違反の内容（未承認 {unapprovedPolicy.length} 件）</h2>
@@ -234,13 +255,13 @@
                 </li>
               {/each}
             </ul>
-            <p class="small muted">意図した変更であれば、開発者に例外の登録（ベースコミットの <code>.agent-orchestrator/policy.json</code>、理由付き）を依頼してください。</p>
+            <p class="tiny muted">意図した変更であれば、開発者に例外の登録（ベースコミットの <code>.agent-orchestrator/policy.json</code>、理由付き）を依頼してください。</p>
           </section>
         {:else}
-          <section class="card" data-testid="policy-findings">
-            <h2>ポリシー違反の内容</h2>
-            <p class="muted">ルールの無効化・テストの削除や無効化・検証設定の緩和は検出されていません。</p>
-          </section>
+          <details class="card" data-testid="policy-findings">
+            <summary>ポリシー違反の内容<span class="count">検出なし</span></summary>
+            <p class="small muted">ルールの無効化・テストの削除や無効化・検証設定の緩和は検出されていません。</p>
+          </details>
         {/if}
 
         <!-- 4. 変更内容 -->
@@ -250,15 +271,15 @@
             <p class="small"><strong>注意:</strong> これらは途中の変更です。完了条件を通過していません。</p>
           {/if}
           {#if report.changedFiles.length === 0}
-            <p class="muted">変更されたファイルはありません。</p>
+            <p class="small muted">変更されたファイルはありません。</p>
           {:else}
-            <ul class="files" data-testid="changed-files">
+            <ul class="files list-plain" data-testid="changed-files">
               {#each report.changedFiles as file (file)}
                 <li><code>{file}</code></li>
               {/each}
             </ul>
           {/if}
-          <details bind:open={diffOpen} data-testid="diff">
+          <details class="section" bind:open={diffOpen} data-testid="diff">
             <summary>差分を表示{report.diffTruncated ? '（サイズ上限により一部省略）' : ''}</summary>
             {#if report.diffExcerpt}
               <pre class="diff">{report.diffExcerpt}</pre>
@@ -266,7 +287,7 @@
               <p class="muted">差分はありません。</p>
             {/if}
           </details>
-          <p class="small muted">作業用コピー: <span data-testid="worktree-path">{report.worktreePath ?? '（なし）'}</span></p>
+          <p class="tiny muted">作業用コピー: <span data-testid="worktree-path">{report.worktreePath ?? '（なし）'}</span></p>
         </section>
 
         <!-- 5. 内部ステータス・技術情報（折りたたみ） -->
@@ -278,7 +299,7 @@
               ／ 理由コード: {REASON_CODE_LABELS[run.reasonCode] ?? run.reasonCode}（{run.reasonCode}）
             {/if}
           </p>
-          <dl>
+          <dl class="small">
             <dt>Run ID</dt>
             <dd>{run.runId}</dd>
             <dt>開始 / 終了</dt>
@@ -315,7 +336,7 @@
                 拒否（allowlist 外）: <strong data-testid="egress-denied">{report.egress.denied}</strong> 件 ／
                 接続エラー: <strong data-testid="egress-errors">{report.egress.errors}</strong> 件
               </p>
-              <dl>
+              <dl class="small">
                 <dt><StatusBadge label="許可" tone="success" /> 通常の AI 通信先</dt>
                 <dd>{report.egress.allowedHosts.length === 0 ? '（なし）' : report.egress.allowedHosts.join(', ')}</dd>
                 <dt><StatusBadge label="拒否" tone="warning" /> allowlist 外への接続（遮断済み）</dt>
@@ -333,7 +354,7 @@
                 <dt><StatusBadge label="エラー" tone="danger" /> 許可先への接続エラー</dt>
                 <dd>{report.egress.errorHosts.length === 0 ? '（なし）' : report.egress.errorHosts.join(', ')}</dd>
               </dl>
-              <p class="small muted">ログにはホスト名とポートだけが記録されます（URL パス・ヘッダー・認証情報は含みません）。</p>
+              <p class="tiny muted">ログにはホスト名とポートだけが記録されます（URL パス・ヘッダー・認証情報は含みません）。</p>
             {/if}
           </div>
 
@@ -359,53 +380,70 @@
       {/if}
     </div>
 
-    <aside class="card" aria-labelledby="history-heading">
+    <aside class="card quiet" aria-labelledby="history-heading">
       <h2 id="history-heading">実行履歴</h2>
-      <HistoryList runs={app.history} selectedId={app.reportRunId} onSelect={(run) => void openRunReport(run.runId)} />
+      <HistoryList runs={app.history} selectedId={app.reportRunId} onSelect={(run) => void openRunReport(run.runId)} compact />
     </aside>
   </div>
 </div>
 
 <style>
-  .outcome {
-    border-left: 6px solid var(--border);
+  .intro {
+    padding: 0.2rem 0 0;
   }
-  .outcome.success {
-    border-left-color: var(--success);
+  .guide {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+    gap: 0.75rem;
+    margin: 0.9rem 0 0.4rem;
   }
-  .outcome.warning {
-    border-left-color: var(--warning, #b7791f);
+  .guide-item {
+    background: var(--surface-alt);
+    border-radius: var(--radius-sm);
+    padding: 0.6rem 0.8rem;
+    display: grid;
+    gap: 0.2rem;
+    align-content: start;
   }
-  .outcome.danger {
-    border-left-color: var(--danger, #c53030);
+  .guide-item dt {
+    font-size: 0.78rem;
   }
-  .outcome.info {
-    border-left-color: var(--info);
+  .guide-item dd {
+    font-size: 0.92rem;
+    word-break: normal;
   }
-  .guidance dd ol {
+  .guide-item ol {
     margin: 0;
     padding-left: 1.2rem;
   }
   .actions {
-    margin-top: 0.75rem;
+    margin-top: 0.9rem;
     flex-wrap: wrap;
   }
-  .findings > li {
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 0.5rem 0.75rem;
-    margin-bottom: 0.5rem;
-    list-style: none;
+  .diagnosis {
+    border-left: 4px solid var(--warning);
+  }
+  .diag-title {
+    font-size: 1.05rem;
   }
   .findings {
     padding-left: 0;
+    list-style: none;
+  }
+  .findings > li {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 0.55rem 0.8rem;
+    margin-bottom: 0.5rem;
   }
   .finding dt {
     font-weight: 600;
-    margin-top: 0.3rem;
   }
   .files {
-    columns: 1;
+    font-size: 0.9rem;
+  }
+  .files > li + li {
+    margin-top: 0.2rem;
   }
   .diff {
     max-height: 32rem;

@@ -5,7 +5,7 @@
     /** Human-readable Japanese label (always shown as text). */
     label: string;
     /** Machine code shown alongside the label, e.g. INTERRUPTED. */
-    code?: string;
+    code?: string | undefined;
     tone?: Tone;
     testid?: string;
   }

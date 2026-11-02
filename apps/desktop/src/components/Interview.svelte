@@ -46,6 +46,8 @@
   const evaluating = $derived(!!draft && !asking && !draft.proposal && draft.state !== 'BLOCKED');
   const roundCount = $derived(draft ? Math.max(1, Math.ceil(draft.totalQuestionsAsked / 3), draft.round) : 1);
   const unresolvedContradictions = $derived(draft?.contradictions ?? []);
+  const roundPct = $derived(draft ? Math.min(100, Math.round((Math.min(draft.round, MAX_INTERVIEW_ROUNDS) / MAX_INTERVIEW_ROUNDS) * 100)) : 0);
+  const answeredNow = $derived(draft ? draft.currentQuestions.filter((q) => (answers[q.id]?.value ?? '').trim() !== '' || answers[q.id]?.skipped).length : 0);
 
   const approveDisabledReasons = $derived.by(() => {
     const reasons: string[] = [];
@@ -102,18 +104,24 @@
   </div>
 {:else}
   <div class="stack" data-testid="screen-interview">
-    <header class="card">
-      <div class="row" style="justify-content: space-between">
-        <h1>ヒアリングと承認</h1>
+    <!-- 見出し: 依頼を主役に、状態と進捗は 1 行 -->
+    <header class="card hero tone-info">
+      <div class="row between">
+        <span class="eyebrow">ヒアリングと承認</span>
         <StatusBadge label={DRAFT_STATE_LABELS[draft.state] ?? draft.state} code={draft.state} tone={draft.state === 'BLOCKED' ? 'danger' : draft.approved ? 'success' : 'info'} testid="draft-state" />
       </div>
-      <p class="small"><strong>依頼:</strong> {draft.request}</p>
-      <p class="small muted"><strong>プロジェクト:</strong> {draft.projectPath} ／ <strong>リビジョン</strong> {draft.revision}</p>
+      <h1 class="headline request">{draft.request}</h1>
+      <p class="tiny muted">プロジェクト: {draft.projectPath} ／ リビジョン {draft.revision}</p>
       <div class="progress" role="group" aria-label="ヒアリングの進捗" data-testid="progress">
-        <span>ラウンド <strong>{Math.min(draft.round, MAX_INTERVIEW_ROUNDS)}/{MAX_INTERVIEW_ROUNDS}</strong></span>
-        <span>質問数 <strong>{draft.totalQuestionsAsked}/{MAX_INTERVIEW_QUESTIONS}</strong></span>
-        <span>未回答の必須質問 <strong>{blocking.length}</strong> 件</span>
-        <span class="muted small">（実施済みラウンド: {roundCount}）</span>
+        <div class="progress-bar" aria-hidden="true"><span style="width: {roundPct}%"></span></div>
+        <div class="row small">
+          <span>ラウンド <strong>{Math.min(draft.round, MAX_INTERVIEW_ROUNDS)}/{MAX_INTERVIEW_ROUNDS}</strong></span>
+          <span class="sep" aria-hidden="true">·</span>
+          <span>質問数 <strong>{draft.totalQuestionsAsked}/{MAX_INTERVIEW_QUESTIONS}</strong></span>
+          <span class="sep" aria-hidden="true">·</span>
+          <span>未回答の必須質問 <strong>{blocking.length}</strong> 件</span>
+          <span class="tiny muted">（実施済みラウンド: {roundCount}）</span>
+        </div>
       </div>
     </header>
 
@@ -135,7 +143,10 @@
       <div class="stack">
         {#if asking}
           <section aria-labelledby="round-heading" class="stack" data-testid="question-round">
-            <h2 id="round-heading">ラウンド {draft.round} の質問（{draft.currentQuestions.length} 問）</h2>
+            <div class="row between">
+              <h2 id="round-heading">ラウンド {draft.round} の質問（{draft.currentQuestions.length} 問）</h2>
+              <span class="small muted">回答済み {answeredNow}/{draft.currentQuestions.length}</span>
+            </div>
             {#each draft.currentQuestions as question, i (question.id)}
               <QuestionCard
                 {question}
@@ -145,13 +156,15 @@
                 onChange={(next) => (answers = { ...answers, [question.id]: next })}
               />
             {/each}
-            <div class="row card actions">
-              <button type="button" class="primary" onclick={submitRound} disabled={app.busy !== null} data-testid="answer-round">回答して次へ</button>
-              <button type="button" onclick={() => void goBack()} disabled={!canGoBack} data-testid="back-round">戻る</button>
-              <span class="small muted">未入力の質問はスキップとして送信されます。必須質問をスキップすると要件は確定できません。</span>
+            <div class="actionbar row between">
+              <div class="row">
+                <button type="button" onclick={() => void goBack()} disabled={!canGoBack} data-testid="back-round">戻る</button>
+                <span class="tiny muted">未入力の質問はスキップとして送信されます。必須質問をスキップすると要件は確定できません。</span>
+              </div>
+              <button type="button" class="primary large" onclick={submitRound} disabled={app.busy !== null} data-testid="answer-round">回答して次へ</button>
             </div>
           </section>
-          <p class="small muted" data-testid="approve-pending-note">すべての質問に回答すると、要件サマリーと「開発を開始」ボタンが表示されます。</p>
+          <p class="tiny muted" data-testid="approve-pending-note">すべての質問に回答すると、要件サマリーと「開発を開始」ボタンが表示されます。</p>
         {:else if draft.state === 'BLOCKED'}
           <section class="card actions row">
             <button type="button" onclick={() => void goBack()} disabled={!canGoBack} data-testid="back-round">戻る</button>
@@ -174,33 +187,30 @@
           <!-- 1. 要件サマリー（平易な概要）を最初に。BLOCKED のときは承認できない理由を見せるために残す -->
           <ApprovalOverview {draft} />
 
-          <!-- 2. 承認 -->
-          <section class="card" aria-labelledby="approve-heading" data-testid="approve-section">
+          <!-- 2. 承認（主操作は常に見える位置に） -->
+          <section class="card actionbar approve" aria-labelledby="approve-heading" data-testid="approve-section">
             <h2 id="approve-heading">承認して開発を開始</h2>
             {#if revisedSinceSummary && !draft.approved}
               <Alert tone="info" role="status" title="要件を変更したため再承認が必要です" message={`リビジョン ${draft.revision} の内容を確認し、同意のチェックを入れ直してから承認してください。`} testid="reapproval-note" />
             {/if}
-            <p class="small">承認すると、上の要件サマリーの内容が固定され、隔離された環境で AI による実装・検証・レビューが始まります。最大 {3} 回の修正ラウンドを行い、終わると結果画面に移ります。所要時間は依頼の大きさと AI の応答により変わります（数分〜数十分）。AI の利用料金が発生します。</p>
-            <Alert tone="info" title="データの取り扱い">
-              <p class="small">この過程で<strong>リポジトリの内容（コード・設定）がモデル提供者へ送信される</strong>可能性があります。機密リポジトリの場合は事前に確認してください。push / merge / deploy は行いません。</p>
-            </Alert>
-            <div class="consent">
-              <input type="checkbox" id="consent" bind:checked={consent} disabled={draft.approved} data-testid="consent" />
-              <label for="consent">リポジトリの内容がモデルに送信されることに同意する</label>
+            <p class="tiny muted">承認すると要件が固定され、隔離環境で AI の実装・検証・レビューが始まります（最大 {3} 回の修正、数分〜数十分、AI の利用料金が発生）。<strong>リポジトリの内容がモデル提供者へ送信される</strong>可能性があります。push / merge / deploy は行いません。</p>
+            <div class="row between approve-row">
+              <div class="consent">
+                <input type="checkbox" id="consent" bind:checked={consent} disabled={draft.approved} data-testid="consent" />
+                <label for="consent">リポジトリの内容がモデルに送信されることに同意する</label>
+              </div>
+              <button type="button" class="primary large" onclick={() => void approveAndStart()} disabled={!canApprove} aria-describedby="approve-reasons" data-testid="approve">この内容で開発を開始</button>
             </div>
-            <div class="row">
-              <button type="button" class="primary" onclick={() => void approveAndStart()} disabled={!canApprove} aria-describedby="approve-reasons" data-testid="approve">この内容で開発を開始</button>
-            </div>
-            <div id="approve-reasons" class="small" data-testid="approve-reasons">
+            <div id="approve-reasons" class="tiny" data-testid="approve-reasons">
               {#if approveDisabledReasons.length > 0}
-                <p class="muted">開始できない理由:</p>
+                <span class="muted">開始できない理由:</span>
                 <ul>
                   {#each approveDisabledReasons as reason, i (i)}
                     <li>{reason}</li>
                   {/each}
                 </ul>
               {:else}
-                <p class="muted">承認できます。ボタンを押すと要件（リビジョン {draft.revision}）が固定され、実行が始まります。</p>
+                <span class="muted">承認できます。ボタンを押すと要件（リビジョン {draft.revision}）が固定され、実行が始まります。</span>
               {/if}
             </div>
           </section>
@@ -215,13 +225,13 @@
           {/if}
         {/if}
 
-        <!-- 4. AI の要件理解・判断の記録（質問中は常時表示、承認時は折りたたみ） -->
+        <!-- 4. AI の要件理解・判断の記録（折りたたみ） -->
         {#if asking}
-          <section class="card" aria-labelledby="understanding-heading">
-            <h2 id="understanding-heading">現在の要件理解</h2>
-            <p class="small muted">回答のたびに再評価されます。確定事項・選択・推奨・未確定は分けて記録します。</p>
+          <details class="card" data-testid="understanding-details">
+            <summary>AI の現在の要件理解（回答のたびに更新）</summary>
+            <p class="tiny muted">確定事項・選択・推奨・未確定は分けて記録されます。</p>
             <pre data-testid="draft-summary">{draft.summary}</pre>
-          </section>
+          </details>
         {:else}
           <details class="card" data-testid="understanding-details">
             <summary>AI の要件理解と判断の記録（技術情報）</summary>
@@ -233,9 +243,9 @@
               <ul class="small" data-testid="decision-log">
                 {#each draft.decisions as d (d.topicKey)}
                   <li class:muted={d.status !== 'active'}>
-                    <span class="badge">{d.source === 'interview' ? '質問' : d.source === 'contradiction' ? '矛盾' : '修正'}</span>
+                    <span class="badge neutral">{d.source === 'interview' ? '質問' : d.source === 'contradiction' ? '矛盾' : '修正'}</span>
                     <strong>{d.topicKey}</strong>: {d.question} → <strong>{d.chosenLabel}</strong>
-                    {#if d.status === 'retracted'}<span class="badge">取り消し</span>{:else if d.status === 'superseded'}<span class="badge">{d.supersededBy} で置き換え</span>{/if}
+                    {#if d.status === 'retracted'}<span class="badge neutral">取り消し</span>{:else if d.status === 'superseded'}<span class="badge neutral">{d.supersededBy} で置き換え</span>{/if}
                     {#if d.consequence}<span class="muted">（{d.consequence}）</span>{/if}
                     {#if d.relatedRequirements.length > 0}<span class="muted"> 対象: {d.relatedRequirements.join(' / ')}</span>{/if}
                     {#if d.history.length > 0}<span class="muted"> 履歴 {d.history.length} 件</span>{/if}
@@ -254,27 +264,28 @@
       <aside class="stack">
         <FactsPanel facts={draft.facts} />
         {#if draft.verificationReadiness}
-          <section class="card" aria-labelledby="verif-heading">
+          <section class="card quiet" aria-labelledby="verif-heading">
             <h2 id="verif-heading">検証プロファイル</h2>
-            <p>
+            <p class="row">
               <StatusBadge label={draft.verificationReadiness.ready ? '準備完了' : '不足あり'} tone={draft.verificationReadiness.ready ? 'success' : 'danger'} />
               <code>{draft.verificationReadiness.profile}</code>
             </p>
-            <p class="small">{draft.verificationReadiness.detail}</p>
+            <p class="tiny muted">{draft.verificationReadiness.detail}</p>
             {#if draft.verificationReadiness.missingScripts.length}
               <p class="small">不足スクリプト: {draft.verificationReadiness.missingScripts.join(', ')}。package.json に追加してください。</p>
             {/if}
           </section>
         {/if}
         {#if draft.answers.length > 0}
-          <section class="card" aria-labelledby="answers-heading">
+          <section class="card quiet" aria-labelledby="answers-heading">
             <h2 id="answers-heading">回答履歴</h2>
-            <ul class="small" data-testid="answer-history">
+            <ul class="small list-plain answers" data-testid="answer-history">
               {#each draft.answers as a (a.questionId)}
                 {@const q = draft.askedQuestions.find((x) => x.id === a.questionId)}
                 <li>
-                  <strong>R{a.round} {a.questionId}</strong> {q?.question ?? ''}<br />
-                  → {a.skipped ? 'スキップ' : (q?.options.find((o) => o.value === a.value)?.label ?? a.value)}
+                  <span class="tiny muted">R{a.round} {a.questionId}</span>
+                  <div>{q?.question ?? ''}</div>
+                  <div class="answer">→ {a.skipped ? 'スキップ' : (q?.options.find((o) => o.value === a.value)?.label ?? a.value)}</div>
                 </li>
               {/each}
             </ul>
@@ -286,28 +297,53 @@
 {/if}
 
 <style>
+  .request {
+    font-size: 1.2rem;
+    font-weight: 600;
+  }
   .progress {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 1rem;
-    padding: 0.5rem 0.75rem;
-    background: var(--surface-alt);
-    border-radius: var(--radius);
+    margin-top: 0.6rem;
+    display: grid;
+    gap: 0.4rem;
+  }
+  .sep {
+    color: var(--muted);
   }
   .actions {
     padding: 0.75rem 1rem;
+  }
+  .approve {
+    padding-top: 0.7rem;
+    padding-bottom: 0.6rem;
+  }
+  .approve h2 {
+    margin-bottom: 0.15rem;
+    font-size: 0.98rem;
+  }
+  .approve-row {
+    margin: 0.35rem 0 0.2rem;
+  }
+  .approve :global(ul) {
+    margin: 0.1rem 0 0;
   }
   .consent {
     display: flex;
     gap: 0.5rem;
     align-items: center;
-    margin: 0.75rem 0;
   }
   .consent label {
     margin: 0;
+    font-weight: 500;
   }
   .consent input {
     width: 1.2rem;
     height: 1.2rem;
+    accent-color: var(--primary);
+  }
+  .answers li + li {
+    margin-top: 0.5rem;
+  }
+  .answer {
+    color: var(--text-soft);
   }
 </style>

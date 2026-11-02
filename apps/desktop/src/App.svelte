@@ -27,9 +27,9 @@
     </div>
     <nav aria-label="画面切り替え" data-testid="screen-nav">
       <ul>
-        {#each SCREENS as s (s.id)}
+        {#each SCREENS as s, i (s.id)}
           <li>
-            <button type="button" class:active={app.screen === s.id} aria-current={app.screen === s.id ? 'page' : undefined} disabled={!available(s.id)} onclick={() => app.navigate(s.id)} title={s.description} data-testid="nav-{s.id}">
+            <button type="button" class:active={app.screen === s.id} aria-current={app.screen === s.id ? 'page' : undefined} disabled={!available(s.id)} onclick={() => app.navigate(s.id)} title={`${i + 1}. ${s.description}`} data-testid="nav-{s.id}">
               {s.label}
             </button>
           </li>
@@ -46,7 +46,6 @@
         </Alert>
       </div>
     {/if}
-
     {#if app.screen === 'home'}
       <Home />
     {:else if app.screen === 'interview'}
@@ -62,7 +61,7 @@
     <span data-testid="transport-kind">接続: {app.transportKind === 'tauri' ? 'Tauri（ローカルランナー）' : 'モック（ブラウザ開発用）'}</span>
     <span data-testid="runner-alive">ランナー: {app.runnerAlive === null ? '確認中' : app.runnerAlive ? '稼働中' : '停止'}</span>
     {#if app.busy}
-      <span role="status">{app.busy}中…</span>
+      <span role="status" class="busy"><span class="dot" aria-hidden="true"></span>{app.busy}中…</span>
     {/if}
   </footer>
 
@@ -80,49 +79,97 @@
     align-items: center;
     justify-content: space-between;
     gap: 1rem;
-    padding: 0.6rem 1.25rem;
+    padding: 0.55rem 1.4rem;
     background: var(--surface);
     border-bottom: 1px solid var(--border);
     position: sticky;
     top: 0;
-    z-index: 2;
+    z-index: 4;
   }
   .brand {
     font-weight: 700;
     display: flex;
     align-items: center;
     gap: 0.5rem;
+    letter-spacing: -0.01em;
   }
   .logo {
     color: var(--primary);
-    font-size: 1.3rem;
+    font-size: 1.25rem;
   }
   nav ul {
     list-style: none;
     display: flex;
-    gap: 0.4rem;
+    gap: 0.25rem;
     margin: 0;
-    padding: 0;
+    padding: 0.2rem;
+    background: var(--surface-sunken);
+    border-radius: 999px;
+  }
+  nav button {
+    border: none;
+    background: transparent;
+    border-radius: 999px;
+    min-height: 2.1rem;
+    padding: 0.3rem 0.95rem;
+    color: var(--muted);
+    font-weight: 600;
+  }
+  nav button:hover:not(:disabled) {
+    background: var(--surface);
+    color: var(--text);
   }
   nav button.active {
-    background: var(--primary);
-    color: var(--primary-text);
-    border-color: var(--primary);
-    font-weight: 700;
+    background: var(--surface);
+    color: var(--primary);
+    box-shadow: var(--shadow-sm);
+  }
+  nav button:disabled {
+    opacity: 0.45;
   }
   main {
-    padding: 1.25rem;
-    max-width: 1400px;
+    padding: 1.25rem 1.4rem 2rem;
+    max-width: 1280px;
     width: 100%;
     margin: 0 auto;
+  }
+  main:focus {
+    outline: none;
   }
   .statusbar {
     display: flex;
     gap: 1.5rem;
-    padding: 0.4rem 1.25rem;
+    padding: 0.4rem 1.4rem;
     border-top: 1px solid var(--border);
     background: var(--surface);
-    font-size: 0.85rem;
     color: var(--muted);
+    font-size: 0.8rem;
+  }
+  .busy {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    color: var(--primary);
+  }
+  .dot {
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 50%;
+    background: var(--primary);
+    animation: pulse 1.2s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%,
+    100% {
+      opacity: 0.35;
+    }
+    50% {
+      opacity: 1;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .dot {
+      animation: none;
+    }
   }
 </style>

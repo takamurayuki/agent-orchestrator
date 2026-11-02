@@ -88,26 +88,28 @@
   </div>
 {:else}
   <div class="stack" data-testid="screen-running">
-    <header class="card">
-      <div class="row" style="justify-content: space-between">
-        <h1>{terminal ? '実行結果' : '実行中'}: {run.taskTitle}</h1>
+    <header class="card hero {terminal ? `tone-${outcome?.tone ?? 'neutral'}` : 'tone-info'}">
+      <div class="row between">
+        <span class="eyebrow">{terminal ? '実行結果' : '実行中'}</span>
         <StatusBadge label={runStateLabel(run.state)} code={run.state} tone={RUN_STATE_TONES[run.state]} testid="run-state" />
       </div>
+      <h1 class="title">{run.taskTitle}</h1>
 
       {#if activity}
-        <div class="activity {terminal ? (outcome?.tone ?? 'neutral') : 'info'}" role="status" aria-live="polite" data-testid="current-activity">
+        <p class="activity" role="status" aria-live="polite" data-testid="current-activity">
+          {#if !terminal}<span class="live-dot" aria-hidden="true"></span>{/if}
           <strong>{terminal ? '結果' : '現在の処理'}:</strong> {activity.title}
           {#if activity.detail}<span class="small muted"> — {activity.detail}</span>{/if}
-        </div>
+        </p>
       {/if}
 
-      <ol class="steps" aria-label="実行ステップ" data-testid="run-steps">
+      <ol class="stepper" aria-label="実行ステップ" data-testid="run-steps">
         {#each RUN_STEPS as step, i (step)}
           {@const done = step === 'ANALYSIS' || i < stepIndex || run.state === 'COMPLETED'}
           {@const current = i === stepIndex && !terminal}
           <li class:done class:current class:blocked={step === 'IMPLEMENTING' && policyBlocked} aria-current={current ? 'step' : undefined} data-step={step}>
-            <span class="mark" aria-hidden="true">{done ? '✔' : current ? '▶' : '○'}</span>
-            {stepLabel(step)}
+            <span class="mark" aria-hidden="true">{done ? '✓' : i + 1}</span>
+            <span class="label">{stepLabel(step)}</span>
             {#if current}<span class="sr-only">（現在）</span>{/if}
           </li>
         {/each}
@@ -116,30 +118,26 @@
         <p class="small" data-testid="policy-blocked-note">静的チェック（Policy Gate）が未承認の違反を検出したため、検証・レビューを行わず AI に修正を依頼しています。残りの試行回数内で解消されない場合は「要確認」で停止します。</p>
       {/if}
 
-      <dl class="meta">
-        <dt>ラウンド</dt>
-        <dd data-testid="run-round">{run.currentRound}/{run.maxRounds}<span class="small muted">（修正は最大 {run.maxRounds} 回まで）</span></dd>
-        <dt>経過時間</dt>
-        <dd data-testid="elapsed" aria-live="off">{elapsed}</dd>
-        <dt>開始</dt>
-        <dd>{formatDateTime(run.startedAt)}</dd>
+      <div class="tiles">
+        <div class="tile"><span class="label">ラウンド</span><span class="value" data-testid="run-round">{run.currentRound}/{run.maxRounds}<span class="tiny muted">（修正は最大 {run.maxRounds} 回まで）</span></span></div>
+        <div class="tile"><span class="label">経過時間</span><span class="value" data-testid="elapsed" aria-live="off">{elapsed}</span></div>
+        <div class="tile"><span class="label">開始</span><span class="value text">{formatDateTime(run.startedAt)}</span></div>
         {#if run.finishedAt}
-          <dt>終了</dt>
-          <dd>{formatDateTime(run.finishedAt)}</dd>
+          <div class="tile"><span class="label">終了</span><span class="value text">{formatDateTime(run.finishedAt)}</span></div>
         {/if}
-      </dl>
+      </div>
       {#if !terminal}
-        <p class="small muted" data-testid="no-eta-note">所要時間は依頼の内容と AI の応答によって大きく変わるため、終了時刻の予測は表示しません。</p>
+        <p class="tiny muted" data-testid="no-eta-note">所要時間は依頼の内容と AI の応答によって大きく変わるため、終了時刻の予測は表示しません。</p>
       {/if}
 
-      <div class="row">
-        <button type="button" class="danger" onclick={() => void cancelRun()} disabled={terminal || app.busy !== null} data-testid="cancel-run">実行を停止する</button>
-        {#if terminal}
-          <button type="button" class="primary" onclick={() => void showResult(run.runId)} data-testid="view-result">結果を見る</button>
-        {/if}
-        {#if !terminal}
-          <span class="small muted">停止すると AI の処理を止め、途中の変更は作業用コピーに残ります。元のプロジェクトは変わりません。</span>
-        {/if}
+      <div class="row between">
+        <span class="tiny muted">{terminal ? '' : '停止すると AI の処理を止め、途中の変更は作業用コピーに残ります。元のプロジェクトは変わりません。'}</span>
+        <div class="row">
+          <button type="button" class="danger" onclick={() => void cancelRun()} disabled={terminal || app.busy !== null} data-testid="cancel-run">実行を停止する</button>
+          {#if terminal}
+            <button type="button" class="primary" onclick={() => void showResult(run.runId)} data-testid="view-result">結果を見る</button>
+          {/if}
+        </div>
       </div>
     </header>
 
@@ -152,11 +150,11 @@
       </Alert>
     {/if}
 
-    <div class="grid-2">
-      <section class="card" aria-labelledby="verification-heading" data-testid="verification-results">
+    <div class="two">
+      <section class="card quiet" aria-labelledby="verification-heading" data-testid="verification-results">
         <h2 id="verification-heading">検証結果</h2>
         {#if !verification}
-          <p class="muted">まだ検証は実行されていません。</p>
+          <p class="small muted">まだ検証は実行されていません。</p>
         {:else}
           <p><StatusBadge label={verification.passed ? '検証成功' : '検証失敗'} tone={verification.passed ? 'success' : 'danger'} /></p>
           <table aria-label="検証コマンド結果">
@@ -177,22 +175,22 @@
         {/if}
       </section>
 
-      <section class="card" aria-labelledby="review-heading" data-testid="review-results">
+      <section class="card quiet" aria-labelledby="review-heading" data-testid="review-results">
         <h2 id="review-heading">レビュー</h2>
         {#if !review}
-          <p class="muted">まだレビューは実行されていません。</p>
+          <p class="small muted">まだレビューは実行されていません。</p>
         {:else}
-          <p>判定: <strong>{VERDICT_LABELS[review.verdict] ?? review.verdict}</strong><span class="small muted">（{review.verdict}）</span></p>
-          <p>指摘件数: <strong data-testid="findings-count">{review.findings}</strong>（うち完了を妨げるもの {review.blocking} 件）</p>
+          <p>判定: <strong>{VERDICT_LABELS[review.verdict] ?? review.verdict}</strong><span class="tiny muted">（{review.verdict}）</span></p>
+          <p>指摘件数: <strong data-testid="findings-count">{review.findings}</strong><span class="small muted">（うち完了を妨げるもの {review.blocking} 件）</span></p>
           {#if review.summary}<p class="small">{review.summary}</p>{/if}
         {/if}
-        <p class="small muted">未解決の blocking 指摘: {run.openBlockingFindings} 件</p>
+        <p class="tiny muted">未解決の blocking 指摘: {run.openBlockingFindings} 件</p>
       </section>
     </div>
 
     <details class="card" data-testid="run-technical">
       <summary>技術情報（Run ID・パス・承認済み要件）</summary>
-      <dl class="meta">
+      <dl class="small">
         <dt>Run ID</dt>
         <dd data-testid="run-id">{run.runId}</dd>
         <dt>内部ステータス</dt>
@@ -210,59 +208,129 @@
       {/if}
     </details>
 
-    <p class="small muted" data-testid="raw-log-note">AI の出力やコマンドの生ログはこの画面には表示しません（秘密情報を含む可能性があるため）。下の詳細ログはイベントの要約だけです。保存されたログファイルは秘密情報をマスキング済みです。</p>
+    <p class="tiny muted" data-testid="raw-log-note">AI の出力やコマンドの生ログはこの画面には表示しません（秘密情報を含む可能性があるため）。下の詳細ログはイベントの要約だけです。保存されたログファイルは秘密情報をマスキング済みです。</p>
     <LogPanel events={app.events} />
   </div>
 {/if}
 
 <style>
-  .meta {
-    margin: 0.5rem 0;
+  .title {
+    font-size: 1.25rem;
+    margin-bottom: 0.5rem;
   }
   .activity {
-    margin: 0.5rem 0;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin: 0.2rem 0 0.9rem;
     padding: 0.6rem 0.9rem;
-    border-radius: var(--radius);
-    border: 1px solid var(--border);
-    background: var(--surface-alt);
+    border-radius: var(--radius-sm);
+    background: var(--primary-soft);
+    font-size: 1rem;
   }
-  .activity.success {
-    border-color: var(--success);
+  .live-dot {
+    width: 0.6rem;
+    height: 0.6rem;
+    border-radius: 50%;
+    background: var(--primary);
+    animation: pulse 1.2s ease-in-out infinite;
+    flex: 0 0 auto;
   }
-  .activity.danger {
-    border-color: var(--danger);
+  @keyframes pulse {
+    0%,
+    100% {
+      opacity: 0.3;
+    }
+    50% {
+      opacity: 1;
+    }
   }
-  .activity.warning {
-    border-color: var(--warning);
+  @media (prefers-reduced-motion: reduce) {
+    .live-dot {
+      animation: none;
+    }
   }
-  .steps {
+  .stepper {
     list-style: none;
     padding: 0;
-    margin: 0.75rem 0;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem;
+    margin: 0.4rem 0 0.9rem;
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 0.3rem;
+    counter-reset: step;
   }
-  .steps li {
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    padding: 0.2rem 0.8rem;
+  .stepper li {
+    position: relative;
+    display: grid;
+    justify-items: center;
+    gap: 0.3rem;
+    text-align: center;
     color: var(--muted);
+    font-size: 0.8rem;
+    padding-top: 0.2rem;
   }
-  .steps li.done {
-    color: var(--success);
+  .stepper li::before {
+    content: '';
+    position: absolute;
+    top: 0.95rem;
+    left: 50%;
+    width: 100%;
+    height: 2px;
+    background: var(--border);
+    z-index: 0;
+  }
+  .stepper li:last-child::before {
+    display: none;
+  }
+  .stepper li.done::before {
+    background: var(--success);
+  }
+  .stepper .mark {
+    position: relative;
+    z-index: 1;
+    width: 1.6rem;
+    height: 1.6rem;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    background: var(--surface);
+    border: 2px solid var(--border-strong);
+    font-weight: 700;
+    font-size: 0.78rem;
+  }
+  .stepper li.done .mark {
+    background: var(--success);
     border-color: var(--success);
+    color: #fff;
   }
-  .steps li.current {
-    color: var(--info);
-    border-color: var(--info);
+  .stepper li.current .mark {
+    border-color: var(--primary);
+    color: var(--primary);
+    box-shadow: 0 0 0 4px var(--primary-soft);
+  }
+  .stepper li.current {
+    color: var(--primary);
     font-weight: 700;
   }
-  .steps li.blocked {
-    color: var(--warning);
+  .stepper li.blocked .mark {
     border-color: var(--warning);
+    color: var(--warning);
   }
-  .mark {
-    margin-right: 0.3rem;
+  .stepper li.blocked {
+    color: var(--warning);
+  }
+  .two {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+  }
+  @media (max-width: 900px) {
+    .two {
+      grid-template-columns: 1fr;
+    }
+    .stepper {
+      grid-template-columns: repeat(3, 1fr);
+    }
   }
 </style>

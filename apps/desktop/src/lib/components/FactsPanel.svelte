@@ -17,42 +17,46 @@
   );
 </script>
 
-<section class="card" aria-labelledby="facts-heading" data-testid="facts-panel">
+<section class="card quiet" aria-labelledby="facts-heading" data-testid="facts-panel">
   <h2 id="facts-heading">リポジトリ調査結果</h2>
-  <p class="small muted">確認済みの事実・AI の推測・未確定事項は分けて表示します。推測は確定事項として扱いません。</p>
+  <p class="tiny muted">確認済みの事実・AI の推測・未確定事項を分けて表示します。推測は確定事項として扱いません。</p>
   {#each groups as group (group.confidence)}
-    <h3 class="group-title {group.confidence}">{group.label} ({group.items.length})</h3>
-    {#if group.items.length === 0}
-      <p class="small muted">なし</p>
-    {:else}
-      <ul class="facts" data-testid="facts-{group.confidence}">
-        {#each group.items as fact, i (`${fact.key}:${i}`)}
-          <li>
-            <div>{fact.value}</div>
-            <div class="small muted">根拠: {fact.source}</div>
-          </li>
-        {/each}
-      </ul>
-    {/if}
+    <details class="section group {group.confidence}" open={group.confidence !== 'confirmed' && group.items.length > 0}>
+      <summary><span class="dot" aria-hidden="true"></span>{group.label}<span class="count">{group.items.length} 件</span></summary>
+      {#if group.items.length === 0}
+        <p class="small muted">なし</p>
+      {:else}
+        <ul class="facts list-plain" data-testid="facts-{group.confidence}">
+          {#each group.items as fact, i (`${fact.key}:${i}`)}
+            <li>
+              <div class="small">{fact.value}</div>
+              <div class="tiny muted">根拠: {fact.source}</div>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    </details>
   {/each}
 </section>
 
 <style>
-  .group-title {
-    margin-top: 0.75rem;
-    padding-left: 0.5rem;
-    border-left: 4px solid var(--neutral);
+  .dot {
+    width: 0.55rem;
+    height: 0.55rem;
+    border-radius: 50%;
+    background: var(--neutral);
+    flex: 0 0 auto;
   }
-  .group-title.confirmed {
-    border-color: var(--success);
+  .group.confirmed .dot {
+    background: var(--success);
   }
-  .group-title.inferred {
-    border-color: var(--warning);
+  .group.inferred .dot {
+    background: var(--warning);
   }
-  .group-title.unknown {
-    border-color: var(--danger);
+  .group.unknown .dot {
+    background: var(--danger);
   }
-  .facts li {
-    margin-bottom: 0.4rem;
+  .facts li + li {
+    margin-top: 0.45rem;
   }
 </style>

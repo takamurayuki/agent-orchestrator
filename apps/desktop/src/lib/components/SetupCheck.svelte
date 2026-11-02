@@ -14,11 +14,15 @@
     setup?: SandboxSetupState | null;
     onSandboxStart?: () => void;
     onSandboxCancel?: () => void;
+    /** 右のレール用: 状態 1 行 + 折りたたみの項目一覧（問題がある項目だけ常時表示） */
+    compact?: boolean;
   }
 
-  let { report, error, busy, onRecheck, setup = null, onSandboxStart, onSandboxCancel }: Props = $props();
+  let { report, error, busy, onRecheck, setup = null, onSandboxStart, onSandboxCancel, compact = false }: Props = $props();
   const imagesMissing = $derived(report ? report.checks.some((c) => c.id.startsWith('docker.image.') && c.status === 'fail') : false);
   const dockerFailing = $derived(report ? report.checks.some((c) => (c.id === 'docker' || c.id === 'docker.cli' || c.id === 'docker.daemon') && c.status === 'fail') : false);
+  const attention = $derived(report ? report.checks.filter((c) => c.status !== 'ok') : []);
+  const okChecks = $derived(report ? report.checks.filter((c) => c.status === 'ok') : []);
 
   const modeLabels: Record<string, string> = {
     'docker-desktop-windows': 'Docker Desktop (Windows コンテナ)',
@@ -28,10 +32,10 @@
   };
 </script>
 
-<section class="card" aria-labelledby="setup-heading" data-testid="setup-check">
-  <div class="row" style="justify-content: space-between">
+<section class="card" class:quiet={compact} aria-labelledby="setup-heading" data-testid="setup-check">
+  <div class="row between">
     <h2 id="setup-heading">セットアップチェック</h2>
-    <button type="button" onclick={onRecheck} disabled={busy} aria-label="環境を再チェック">再チェック</button>
+    <button type="button" class="ghost small" onclick={onRecheck} disabled={busy} aria-label="環境を再チェック">再チェック</button>
   </div>
 
   {#if error}
@@ -41,16 +45,10 @@
   {:else if !report}
     <p class="muted" role="status">環境を確認しています…</p>
   {:else}
-    <p>
-      <StatusBadge
-        label={report.canRun ? '実行可能' : '実行不可：セットアップが必要です'}
-        tone={report.canRun ? 'success' : 'danger'}
-        testid="env-status"
-      />
-      <span class="small muted" style="margin-left: 0.6rem">
-        実行モード: {modeLabels[report.executionMode] ?? report.executionMode} ／ 確認時刻: {formatDateTime(report.checkedAt)}
-      </span>
-    </p>
+    <div class="status">
+      <StatusBadge label={report.canRun ? '実行可能' : '実行不可：セットアップが必要です'} tone={report.canRun ? 'success' : 'danger'} testid="env-status" />
+      <div class="tiny muted">{modeLabels[report.executionMode] ?? report.executionMode} ／ 確認時刻 {formatDateTime(report.checkedAt)}</div>
+    </div>
     {#if !report.canRun}
       <Alert tone="warning" role="status" title="実行環境が整っていないため、依頼の開始はできません">
         <p class="small">プロジェクトの確認や過去の履歴の閲覧はできます。以下の修正方法に従って環境を整えてから「再チェック」を押してください。</p>
@@ -59,44 +57,56 @@
     {#if (imagesMissing && !dockerFailing) || (setup && setup.state !== 'idle')}
       <SandboxSetup {setup} {busy} onStart={() => onSandboxStart?.()} onCancel={() => onSandboxCancel?.()} />
     {/if}
-    <ul class="checks" aria-label="環境チェック項目">
-      {#each report.checks as check (check.id)}
-        <li class="check" data-testid="env-check" data-status={check.status}>
-          <div class="row">
+
+    {#if compact}
+      {#if attention.length > 0}
+        <ul class="list-plain" aria-label="確認が必要な項目">
+          {#each attention as check (check.id)}
+            <li class="check-row" data-testid="env-check" data-status={check.status}>
+              <StatusBadge label={ENV_STATUS_LABELS[check.status] ?? check.status} tone={ENV_STATUS_TONES[check.status] ?? 'neutral'} />
+              <strong>{check.label}</strong>
+              <div class="detail">{check.detail}</div>
+              {#if check.fix}<div class="fix"><strong>修正方法:</strong> {check.fix}</div>{/if}
+            </li>
+          {/each}
+        </ul>
+      {/if}
+      <details class="section" data-testid="env-ok">
+        <summary>正常 {okChecks.length} 件</summary>
+        <ul class="list-plain" aria-label="環境チェック項目">
+          {#each okChecks as check (check.id)}
+            <li class="check-row" data-testid="env-check" data-status={check.status}>
+              <StatusBadge label={ENV_STATUS_LABELS[check.status] ?? check.status} tone={ENV_STATUS_TONES[check.status] ?? 'neutral'} />
+              <strong>{check.label}</strong>
+              <div class="detail">{check.detail}</div>
+            </li>
+          {/each}
+        </ul>
+      </details>
+    {:else}
+      <ul class="list-plain" aria-label="環境チェック項目">
+        {#each report.checks as check (check.id)}
+          <li class="check-row" data-testid="env-check" data-status={check.status}>
             <StatusBadge label={ENV_STATUS_LABELS[check.status] ?? check.status} tone={ENV_STATUS_TONES[check.status] ?? 'neutral'} />
             <strong>{check.label}</strong>
-          </div>
-          <div class="small">{check.detail}</div>
-          {#if check.fix}
-            <div class="fix small"><span class="fix-label">修正方法:</span> {check.fix}</div>
-          {/if}
-        </li>
-      {/each}
-    </ul>
+            <div class="detail">{check.detail}</div>
+            {#if check.fix}<div class="fix"><strong>修正方法:</strong> {check.fix}</div>{/if}
+          </li>
+        {/each}
+      </ul>
+    {/if}
   {/if}
 </section>
 
 <style>
-  .checks {
-    list-style: none;
-    padding: 0;
-    margin: 0.5rem 0 0;
+  .status {
     display: grid;
-    gap: 0.5rem;
+    gap: 0.2rem;
+    margin: 0.3rem 0 0.6rem;
   }
-  .check {
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 0.5rem 0.75rem;
-  }
-  .fix {
-    margin-top: 0.25rem;
-    padding: 0.4rem 0.6rem;
-    background: var(--warning-bg);
-    border-left: 4px solid var(--warning);
-    border-radius: 4px;
-  }
-  .fix-label {
-    font-weight: 600;
+  button.small {
+    min-height: 1.9rem;
+    padding: 0.2rem 0.6rem;
+    font-size: 0.82rem;
   }
 </style>

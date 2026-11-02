@@ -1,6 +1,5 @@
 <script lang="ts">
   import type { AskedQuestion } from '@agent-orchestrator/contracts';
-  import StatusBadge from './StatusBadge.svelte';
   import type { QuestionDraftAnswer } from './types';
 
   interface Props {
@@ -22,50 +21,50 @@
   function selectOption(value: string) {
     onChange({ value, skipped: false });
   }
-
   function setFreeText(text: string) {
     onChange({ value: text, skipped: false });
   }
-
   function toggleSkip() {
     onChange({ value: answer.skipped ? answer.value : '', skipped: !answer.skipped });
   }
 </script>
 
-<article class="card question" aria-labelledby="{groupName}-title" data-testid="question-card" data-question-id={question.id}>
-  <header class="row" style="justify-content: space-between; align-items: flex-start">
-    <h3 id="{groupName}-title">
-      <span class="muted small">質問 {index}</span><br />
-      {question.question}
-    </h3>
-    <StatusBadge label={blocking ? '必須（回答しないと進めません）' : '任意'} tone={blocking ? 'warning' : 'neutral'} />
+<article class="card question" class:answered={!unanswered && !answer.skipped} class:skipped={answer.skipped} aria-labelledby="{groupName}-title" data-testid="question-card" data-question-id={question.id}>
+  <header class="q-head">
+    <span class="stepnum" aria-hidden="true">{index}</span>
+    <div class="q-title">
+      <h3 id="{groupName}-title">{question.question}</h3>
+      <span class="tiny" class:must={blocking} class:muted={!blocking}>{blocking ? '必須（回答しないと進めません）' : '任意'}</span>
+    </div>
   </header>
 
   <fieldset {disabled}>
-    <legend>選択肢</legend>
-    {#each question.options as option (option.value)}
-      <div class="option">
-        <input type="radio" id="{groupName}-{option.value}" name={groupName} value={option.value} checked={answer.value === option.value && !answer.skipped} onchange={() => selectOption(option.value)} />
-        <label for="{groupName}-{option.value}">{option.label}</label>
-      </div>
-    {/each}
-    <div class="option free">
-      <label for="{groupName}-free">その他（自由入力）</label>
+    <legend class="sr-only">選択肢</legend>
+    <div class="options" role="radiogroup" aria-label="選択肢">
+      {#each question.options as option (option.value)}
+        <label class="option" class:checked={answer.value === option.value && !answer.skipped} for="{groupName}-{option.value}">
+          <input type="radio" id="{groupName}-{option.value}" name={groupName} value={option.value} checked={answer.value === option.value && !answer.skipped} onchange={() => selectOption(option.value)} />
+          <span>{option.label}</span>
+        </label>
+      {/each}
+    </div>
+    <div class="free">
+      <label for="{groupName}-free" class="tiny muted">その他</label>
       <input type="text" id="{groupName}-free" value={freeText} placeholder="選択肢にない場合はここに入力" oninput={(e) => setFreeText((e.currentTarget as HTMLInputElement).value)} />
     </div>
   </fieldset>
 
   <aside class="recommendation" aria-label="推奨案（AI の提案であり、確認済みの事実ではありません）">
-    <div class="rec-title">推奨案（AI の提案）</div>
-    <p class="small">{question.recommendation}</p>
-    <p class="small muted">※ 推奨案は確定事項ではありません。上の選択肢で決定してください。</p>
+    <span class="rec-icon" aria-hidden="true">💡</span>
+    <div>
+      <span class="rec-title">推奨案（AI の提案）</span>
+      <span class="small">{question.recommendation}</span>
+      <span class="tiny muted"> ※ 確定事項ではありません。上の選択肢で決定してください。</span>
+    </div>
   </aside>
 
-  <div class="row" style="justify-content: space-between">
-    <button type="button" onclick={toggleSkip} {disabled} aria-pressed={answer.skipped} data-testid="skip-question">
-      {answer.skipped ? 'スキップを取り消す' : 'この質問をスキップ'}
-    </button>
-    <span class="small" role="status">
+  <footer class="row between">
+    <span class="tiny" role="status" class:muted={!answer.skipped}>
       {#if answer.skipped}
         スキップ予定{blocking ? '（必須のため要件は確定できず BLOCKED になります）' : ''}
       {:else if unanswered}
@@ -74,40 +73,97 @@
         回答済み
       {/if}
     </span>
-  </div>
+    <button type="button" class="link" onclick={toggleSkip} {disabled} aria-pressed={answer.skipped} data-testid="skip-question">
+      {answer.skipped ? 'スキップを取り消す' : 'この質問をスキップ'}
+    </button>
+  </footer>
 </article>
 
 <style>
   .question {
     display: grid;
+    gap: 0.75rem;
+    border-left: 4px solid var(--border-strong);
+  }
+  .question.answered {
+    border-left-color: var(--success);
+  }
+  .question.skipped {
+    border-left-color: var(--warning);
+  }
+  .q-head {
+    display: flex;
     gap: 0.7rem;
+    align-items: flex-start;
+  }
+  .q-title h3 {
+    font-size: 1.02rem;
+    margin: 0 0 0.15rem;
+  }
+  .must {
+    color: var(--warning);
+    font-weight: 600;
+  }
+  .options {
+    display: grid;
+    gap: 0.35rem;
   }
   .option {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    padding: 0.2rem 0;
-  }
-  .option label {
-    margin: 0;
+    gap: 0.6rem;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
     font-weight: 400;
+    margin: 0;
+    cursor: pointer;
+    background: var(--surface);
   }
-  .option.free {
-    display: block;
+  .option:hover {
+    border-color: var(--muted);
+  }
+  .option.checked {
+    border-color: var(--primary);
+    background: var(--primary-soft);
+  }
+  .option input {
+    margin: 0;
+    width: 1.05rem;
+    height: 1.05rem;
+    accent-color: var(--primary);
+  }
+  .free {
     margin-top: 0.4rem;
+    display: grid;
+    grid-template-columns: auto 1fr;
+    align-items: center;
+    gap: 0.6rem;
   }
-  .option.free label {
-    font-weight: 600;
-    margin-bottom: 0.2rem;
+  .free label {
+    margin: 0;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+  .free input {
+    padding: 0.35rem 0.6rem;
+    font-size: 0.9rem;
   }
   .recommendation {
-    border: 1px dashed var(--info);
-    background: var(--info-bg);
-    border-radius: var(--radius);
-    padding: 0.5rem 0.75rem;
+    display: flex;
+    gap: 0.55rem;
+    align-items: flex-start;
+    padding: 0.5rem 0.7rem;
+    background: var(--surface-alt);
+    border-radius: var(--radius-sm);
+  }
+  .rec-icon {
+    flex: 0 0 auto;
   }
   .rec-title {
     font-weight: 700;
-    color: var(--info);
+    font-size: 0.82rem;
+    color: var(--text-soft);
+    margin-right: 0.35rem;
   }
 </style>
