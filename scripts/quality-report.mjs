@@ -45,12 +45,13 @@ lines.push(`| 元リポジトリ不変 | ${runs.every((r) => r.originalRepoUncha
 lines.push('');
 // 改善前後の比較（v0.2.0）: タスク名の接頭辞でフェーズ分け
 const phases = [
-  { key: 'v2.x〜β（改善前）', match: (n) => !n.startsWith('v020') && !n.startsWith('v021') && !n.startsWith('v022') },
+  { key: 'v2.x〜β（改善前）', match: (n) => !n.startsWith('v020') && !n.startsWith('v021') && !n.startsWith('v022') && !n.startsWith('v03') },
   { key: 'v0.2.0（改善後）', match: (n) => n.startsWith('v020') },
   { key: 'v0.2.1（安定化）', match: (n) => n.startsWith('v021') },
-  { key: 'v0.2.2（最終安定化・実 CLI 検証 TEST-01〜05）', match: (n) => n.startsWith('v022') }
+  { key: 'v0.2.2（最終安定化・実 CLI 検証 TEST-01〜05）', match: (n) => n.startsWith('v022') },
+  { key: 'v0.3（npm / yarn 対応の実 CLI 検証）', match: (n) => n.startsWith('v03') }
 ];
-lines.push('', '## 改善前後（名前接頭辞 v020- / v021- / v022- で区別）', '', '| フェーズ | タスク | 完了率 | 実行環境起因の失敗 | 要確認 | 承認前停止 | 平均時間 | 平均ラウンド | Builder 費用（合計 / 完了タスク平均） | レビュー指摘ありラウンド | unknown |', '|---|---|---|---|---|---|---|---|---|---|---|');
+lines.push('', '## 改善前後（名前接頭辞 v020- / v021- / v022- / v03- で区別）', '', '| フェーズ | タスク | 完了率 | 実行環境起因の失敗 | 要確認 | 承認前停止 | 平均時間 | 平均ラウンド | Builder 費用（合計 / 完了タスク平均） | レビュー指摘ありラウンド | unknown |', '|---|---|---|---|---|---|---|---|---|---|---|');
 for (const ph of phases) {
   const rs = runs.filter((r) => ph.match(r.name));
   if (rs.length === 0) continue;

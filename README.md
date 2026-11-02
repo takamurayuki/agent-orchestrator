@@ -108,7 +108,7 @@ Run の起動前には、変更前のリポジトリに対して検証プロフ�
 
 ## 検証プロファイル
 
-`node-pnpm` のみ。対象リポジトリの `package.json` に `typecheck` / `lint` / `test:run` scripts と `pnpm-lock.yaml` が必要です。実行コマンドは固定（`pnpm install --frozen-lockfile --ignore-scripts` → `pnpm run typecheck` → `pnpm run lint` → `pnpm run test:run`）で、task.yaml から任意コマンドは実行できません。
+`node-pnpm` / `node-npm` / `node-yarn`（Yarn 1）。lockfile（`pnpm-lock.yaml` / `package-lock.json` / `yarn.lock`）から自動で選びます。対象リポジトリの `package.json` に `typecheck` / `lint` / `test:run` scripts が必要です。インストールは lockfile 固定・インストール時スクリプト無効で行います。Yarn 2+（Berry）と bun は未対応です（v0.3、D-44）。npm は実 CLI で完了まで確認済み、Yarn 1 は実装済みですが開発環境で `registry.yarnpkg.com` からの取得が遅く実機確認が未完了です（`docs/FINAL_REPORT.md` 0¹² 節）。実行コマンドは固定（`pnpm install --frozen-lockfile --ignore-scripts` → `pnpm run typecheck` → `pnpm run lint` → `pnpm run test:run`）で、task.yaml から任意コマンドは実行できません。
 
 ## セキュリティ・隔離の設計
 

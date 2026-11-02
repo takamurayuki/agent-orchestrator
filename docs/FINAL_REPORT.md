@@ -2,6 +2,26 @@
 
 作成日: 2026-11-01（リリース準備フェーズ後に更新）　対象: `docs/SPEC.md` v2.0　受入結果: `docs/ACCEPTANCE_REPORT.md`（**PASS 56 / FAIL 0 / NOT_RUN 0**）
 
+## 0¹². v0.3 作業（2026-11-02 追記）: パッケージマネージャ対応と UI 磨き込み
+
+### パッケージマネージャ対応（D-44）
+
+| 項目 | 内容 |
+|---|---|
+| 背景 | 利用者から「pnpm 以外のプロジェクトは実行不可になる」との指摘。検証プロファイルが `node-pnpm` のみだった |
+| 実装 | lockfile から `node-pnpm` / `node-npm`（`npm ci --ignore-scripts --no-audit --no-fund`）/ `node-yarn`（Yarn 1、`yarn install --frozen-lockfile --ignore-scripts --non-interactive`）を自動選択。task.yaml に固定。script の実行（検証・生成物の再生成・Builder / Reviewer への指示）は `<pm> run <script>` をプロファイルから組み立て、任意コマンドは組み立てない。npm / yarn のキャッシュはワークスペースボリューム内（同期から除外）。事前診断は lockfile の形式・packageManager の整合・取得先ホストをマネージャごとに判定し、Yarn 2+（Berry）と bun は「実行不可」と理由・対処を表示。既定の egress allowlist に `registry.yarnpkg.com`（Yarn 1 の lockfile が参照する npm ミラー）を追加 |
+| 安全条件 | 全プロファイル共通: lockfile 固定・インストール時スクリプト無効・package.json の typecheck / lint / test:run のみ。隔離・seccomp・Policy Gate・完了ゲートは不変 |
+| テスト | Vitest 263 passed（新規: プロファイル検出・readiness・argv、診断の npm / yarn / Berry / bun / 不整合、生成物検証の run 接頭辞）、Playwright 31 passed、tsc / svelte-check / eslint クリーン |
+| 実 CLI（npm） | サンプル `--pm npm`（`package-lock.json`）: 素案が生成物 `docs/API.md` を識別、Run は **COMPLETED**（1 ラウンド、736 秒、$0.13、検証 6/6 = `npm ci` 14 秒 / typecheck / lint / test:run / `generate:docs:api`（`npm run`）/ structure、Codex approved）。task.yaml は `verificationProfile: node-npm` |
+| 実 CLI（yarn 1） | **未検証**（実装・単体テスト済み）。サンプル `--pm yarn`（Yarn 1 の `yarn.lock`）で `node-yarn` が選ばれ、起動前検査の `yarn install --frozen-lockfile --ignore-scripts` がサンドボックスで実行されたが、`registry.yarnpkg.com` からの取得が極端に遅く（egress は許可 156 / 拒否 0 / 接続切れ 7。ホスト上の yarn 1 でも 150 秒で完了せず、curl 単体では 1.3 秒）、install の上限 10 分内に完了せず PRECHECK_FAILED（AI は実行していない）。`--registry https://registry.npmjs.org` を付けても Yarn 1 は lockfile の resolved URL（yarnpkg）から取得するため効果なし（実測）。この環境固有の可能性が高く、別環境での再検証を要する |
+| 残課題 | Yarn 2+（Berry）は corepack と yarnpkg への通信許可が必要で未対応。bun 未対応。pnpm の minimumReleaseAge に相当する公開経過時間の保護は npm / yarn 1 に無い。サンプル生成（`make-sample-repo.mjs --pm yarn`）は、このリポジトリの配下では yarn 1.22 が親の `packageManager: pnpm` を拾って拒否するため、リポジトリ外のディレクトリで生成する |
+
+最初の実 CLI 実行では、リポジトリ調査が返すプロジェクト情報のプロファイル名が `node-pnpm` 固定のままで承認時に「pnpm-lock.yaml が見つかりません」で止まった（修正済み: 検出したプロファイル名を返す）。
+
+### UI / UX 磨き込み
+
+方針と前後の比較は `docs/UX_POLISH.md`。バックエンド・IPC・testid は不変、Playwright 31 passed。
+
 ## 0¹¹. v0.2.2 最終安定化・リリース検証の結果（2026-11-02 追記）
 
 詳細は `docs/V022_VERIFICATION.md`。

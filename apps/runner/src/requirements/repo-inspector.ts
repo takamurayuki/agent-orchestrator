@@ -5,7 +5,7 @@ import type { Fact, GeneratedInput, ProjectInfo } from '@agent-orchestrator/cont
 import type { RunnerConfig } from '../config.js';
 import { diagnoseProject } from './diagnosis.js';
 import { detectGeneratedFiles, detectGenerationScripts, extractGeneratorPaths, generationFacts, generatorInputFacts, type GeneratorAnalysis } from './generated.js';
-import { checkProfileReadiness } from '../verification/profiles.js';
+import { checkProfileReadiness, detectProfileFromFiles } from '../verification/profiles.js';
 import { collectEslintSettings, parseJsonc } from '../policy-gate.js';
 import type { WorkspaceManager } from '../workspace.js';
 
@@ -265,24 +265,28 @@ export class RepoInspector {
     }
     facts.push(...generatorInputFacts(Object.values(generators)));
 
-    const readiness = checkProfileReadiness(root, 'node-pnpm');
-    fact('verification.node-pnpm', readiness.ready ? '実行可能（typecheck / lint / test:run あり）' : readiness.detail, 'package.json', 'confirmed');
+    // 検証プロファイルは lockfile から決める（pnpm / npm / yarn classic。v0.3、D-44）。lockfile が無い・未対応（bun 等）なら開始できない
+    const profileName = detectProfileFromFiles(files);
+    const readiness = profileName
+      ? checkProfileReadiness(root, profileName)
+      : { profile: 'node-pnpm' as const, ready: false, missingScripts: [], detail: packageManager ? `${packageManager} はサンドボックスで未対応です（対応: pnpm / npm / yarn 1）` : 'lockfile（pnpm-lock.yaml / package-lock.json / yarn.lock）が見つかりません' };
+    fact(`verification.${readiness.profile}`, readiness.ready ? `実行可能（${readiness.profile}: typecheck / lint / test:run あり）` : readiness.detail, 'package.json', 'confirmed');
     for (const s of ['typecheck', 'lint', 'test:run', 'test', 'build', 'dev']) {
       const v = pkg?.scripts?.[s];
       if (typeof v === 'string') fact(`script.${s}`, v, 'package.json#scripts', 'confirmed');
     }
 
     const problems: ProjectInfo['problems'] = [];
-    if (!readiness.ready) problems.push({ code: 'VERIFICATION_NOT_READY', message: readiness.detail, fix: 'package.json に typecheck / lint / test:run を定義し、pnpm-lock.yaml を用意してください' });
+    if (!readiness.ready) problems.push({ code: 'VERIFICATION_NOT_READY', message: readiness.detail, fix: 'package.json に typecheck / lint / test:run を定義し、pnpm / npm / yarn 1 のいずれかの lockfile をコミットしてください' });
     if (isClean === false) problems.push({ code: 'REPO_DIRTY', message: '未コミットの変更があります', fix: '実行前に commit または stash してください' });
     if (symlinksSkipped.length > 0) problems.push({ code: 'SYMLINKS_SKIPPED', message: `symlink を ${symlinksSkipped.length} 件スキップしました`, fix: null });
 
     // 事前診断（v0.2.0、D-38）: 読み取り専用。fail は problems にも載せて開始を止める。warn / unverified は facts にしてヒアリングに渡す
     const workspacePackages = files.filter((f) => /^(apps|packages)\/[^/]+\/package\.json$/.test(f));
-    const diagnosis = diagnoseProject({ files, readText, packageManager, verificationReady: readiness.ready, verificationDetail: readiness.detail, isClean, egressAllowlist: this.config.egressAllowlist, workspacePackages });
+    const diagnosis = diagnoseProject({ files, readText, packageManager, verificationProfile: profileName, verificationReady: readiness.ready, verificationDetail: readiness.detail, isClean, egressAllowlist: this.config.egressAllowlist, workspacePackages });
     for (const c of diagnosis.checks) {
       if (c.status === 'fail' && !['verification', 'worktree'].includes(c.id)) problems.push({ code: `DIAG_${c.id.toUpperCase()}`, message: c.detail, fix: c.fix });
-      if (c.status !== 'ok') fact(`env.${c.id}`, `${c.status === 'unverified' ? '未確認: ' : c.status === 'warn' ? '注意: ' : '問題: '}${c.detail}`, c.id === 'supply_chain' ? 'pnpm-workspace.yaml / .npmrc' : c.id === 'network' ? 'pnpm-lock.yaml / .npmrc / package.json' : 'package.json', c.status === 'unverified' ? 'unknown' : 'confirmed');
+      if (c.status !== 'ok') fact(`env.${c.id}`, `${c.status === 'unverified' ? '未確認: ' : c.status === 'warn' ? '注意: ' : '問題: '}${c.detail}`, c.id === 'supply_chain' ? 'pnpm-workspace.yaml / .npmrc' : c.id === 'network' ? 'lockfile / .npmrc / package.json' : 'package.json', c.status === 'unverified' ? 'unknown' : 'confirmed');
     }
 
     const readmeName = files.find((f) => /^readme(\.md|\.txt)?$/i.test(f));
@@ -312,7 +316,7 @@ export class RepoInspector {
       packageManager,
       frameworks,
       testFrameworks,
-      verificationProfile: { name: 'node-pnpm', ready: readiness.ready, missingScripts: readiness.missingScripts },
+      verificationProfile: { name: readiness.profile, ready: readiness.ready, missingScripts: readiness.missingScripts },
       problems,
       fileCount: files.length,
       inspectedAt,

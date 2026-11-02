@@ -9,6 +9,7 @@
   const p = $derived(draft.proposal);
   const activeDecisions = $derived(draft.decisions.filter((d) => d.status === 'active'));
   const generatedMissing = $derived(p ? p.generatedArtifacts.filter((g) => g.inputStatus === 'missing').length : 0);
+  const runCmd = $derived(draft.verificationReadiness?.profile === 'node-npm' ? 'npm run' : draft.verificationReadiness?.profile === 'node-yarn' ? 'yarn run' : 'pnpm run');
 </script>
 
 {#if p}
@@ -86,7 +87,7 @@
         <ul data-testid="overview-generated-artifacts">
           {#each p.generatedArtifacts as g, i (i)}
             <li>
-              <code>{g.path}</code> ← <code>pnpm run {g.script}</code><span class="tiny muted">（{g.reason}）</span>
+              <code>{g.path}</code> ← <code>{runCmd} {g.script}</code><span class="tiny muted">（{g.reason}）</span>
               {#if g.inputStatus === 'missing'}
                 <div class="small" data-testid="generated-input-status" data-status="missing"><strong>注意:</strong> 生成スクリプトの入力 {(g.inputs ?? []).filter((x) => x.status === 'ignored' || x.status === 'missing').map((x) => x.path).join(', ')} は Git 管理外で、隔離環境にはありません。再生成の最新性だけを検証し、内容の妥当性は未確認になります。</div>
               {:else if g.inputStatus === 'unknown'}

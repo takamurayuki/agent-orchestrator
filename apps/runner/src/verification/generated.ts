@@ -1,11 +1,12 @@
-import type { GeneratedArtifact, VerificationCommandResult } from '@agent-orchestrator/contracts';
+import type { GeneratedArtifact, VerificationCommandResult, VerificationProfileName } from '@agent-orchestrator/contracts';
+import { runScriptArgv } from './profiles.js';
 import { CONTAINER_WORKSPACE, type SandboxExecutor } from '../isolation/types.js';
 import { excerpt } from '../masking.js';
 
 /**
  * 生成物の更新検証（v0.2.1、D-41）。Verifier の一部として、承認済み task の generatedArtifacts ごとに
  *   1. 生成物の正規化ハッシュを取る（固定の node スクリプト。ISO 時刻と行末空白は無視）
- *   2. `pnpm run <script>` をサンドボックス内（network none、workspace rw）で実行する
+ *   2. `<pm> run <script>`（pnpm / npm / yarn、プロファイルで決まる）をサンドボックス内（network none、workspace rw）で実行する
  *   3. 再びハッシュを取り、1 と一致すれば「最新」= 合格。違えば Builder の出力が古い / 未更新 = 不合格
  * script は package.json の scripts 名だけを受け付ける（任意のシェルコマンドは実行しない）。失敗は AI の推測で覆せない。
  * Verifier はワークスペースを変更しない: 再生成の前に生成物を退避し、比較後に Builder の出力へ戻す（再生成で変わった内容は結果メッセージにだけ残る）。
@@ -30,6 +31,8 @@ export interface GeneratedVerifyInput {
   runId: string;
   round: number;
   artifacts: readonly GeneratedArtifact[];
+  /** 検証プロファイル（script の実行コマンドを決める）。省略時は node-pnpm */
+  profile?: VerificationProfileName;
   env: Record<string, string>;
   timeoutMs: number;
   signal: AbortSignal;
@@ -41,7 +44,8 @@ export async function verifyGeneratedArtifacts(sandbox: SandboxExecutor, input: 
   for (const a of input.artifacts) {
     const started = Date.now();
     const name = `generate:${a.script}`;
-    const fail = (detail: string, exitCode: number | null = 1, timedOut = false): VerificationCommandResult => ({ name, argv: ['pnpm', 'run', a.script], exitCode, timedOut, durationMs: Date.now() - started, stdoutExcerpt: excerpt(detail, 6000), stderrExcerpt: '', truncated: false });
+    const argv = runScriptArgv(input.profile ?? 'node-pnpm', a.script);
+    const fail = (detail: string, exitCode: number | null = 1, timedOut = false): VerificationCommandResult => ({ name, argv, exitCode, timedOut, durationMs: Date.now() - started, stdoutExcerpt: excerpt(detail, 6000), stderrExcerpt: '', truncated: false });
     if (!SCRIPT_NAME_RE.test(a.script) || a.path.includes('..') || a.path.startsWith('/')) {
       results.push(fail(`生成スクリプト名または生成物パスが不正です: ${a.script} / ${a.path}`));
       continue;
@@ -51,13 +55,13 @@ export async function verifyGeneratedArtifacts(sandbox: SandboxExecutor, input: 
       return r.exitCode === 0 ? r.stdout.trim() : null;
     };
     const snapshot = (mode: 'snapshot' | 'restore') => sandbox.exec(input.runId, { name: `generate-${mode}-r${input.round}`, argv: ['node', '-e', SNAPSHOT_SCRIPT, mode, a.path], workspace: 'rw', aux: 'none', workdir: CONTAINER_WORKSPACE, env: input.env, network: 'none', timeoutMs: 60_000, signal: input.signal });
-    input.onLog(`\n$ pnpm run ${a.script}  # 生成物 ${a.path} の更新確認（比較後に Builder の出力へ戻す）\n`);
+    input.onLog(`\n$ ${argv.join(' ')}  # 生成物 ${a.path} の更新確認（比較後に Builder の出力へ戻す）\n`);
     const before = await hash('before');
     await snapshot('snapshot');
     let run;
     let after: string | null = null;
     try {
-      run = await sandbox.exec(input.runId, { name: `generate-${a.script.replace(/[^A-Za-z0-9-]/g, '-')}-r${input.round}`, argv: ['pnpm', 'run', a.script], workspace: 'rw', aux: 'none', workdir: CONTAINER_WORKSPACE, env: input.env, network: 'none', timeoutMs: input.timeoutMs, signal: input.signal, onStdout: input.onLog, onStderr: input.onLog });
+      run = await sandbox.exec(input.runId, { name: `generate-${a.script.replace(/[^A-Za-z0-9-]/g, '-')}-r${input.round}`, argv, workspace: 'rw', aux: 'none', workdir: CONTAINER_WORKSPACE, env: input.env, network: 'none', timeoutMs: input.timeoutMs, signal: input.signal, onStdout: input.onLog, onStderr: input.onLog });
       if (!run.timedOut && run.exitCode === 0) after = await hash('after');
     } finally {
       // Verifier はワークスペースを変更しない（生成物は Builder の出力に戻す）
@@ -80,7 +84,7 @@ export async function verifyGeneratedArtifacts(sandbox: SandboxExecutor, input: 
     } else {
       const missingInputs = (a.inputs ?? []).filter((i) => i.status === 'ignored' || i.status === 'missing').map((i) => i.path);
       const validity = a.inputStatus === 'missing' ? `。ただし入力 ${missingInputs.join(', ')} は Git 管理外で隔離環境に無いため、内容の妥当性は未確認（最新性のみ確認）` : a.inputStatus === 'unknown' ? '。入力は静的に確定できないため、内容の妥当性は未確認（最新性のみ確認）' : '';
-      results.push({ name, argv: ['pnpm', 'run', a.script], exitCode: 0, timedOut: false, durationMs: Date.now() - started, stdoutExcerpt: `生成物 ${a.path} は最新です（${a.script} の再実行で変化なし）${validity}`, stderrExcerpt: '', truncated: false });
+      results.push({ name, argv, exitCode: 0, timedOut: false, durationMs: Date.now() - started, stdoutExcerpt: `生成物 ${a.path} は最新です（${a.script} の再実行で変化なし）${validity}`, stderrExcerpt: '', truncated: false });
     }
   }
   return results;

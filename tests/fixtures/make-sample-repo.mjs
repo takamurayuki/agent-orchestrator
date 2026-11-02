@@ -2,7 +2,7 @@
 // LIVE テスト用の小さなサンプルリポジトリを作る（node-pnpm プロファイル対応）。
 // 使い方: node tests/fixtures/make-sample-repo.mjs <dir>
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 const dir = resolve(process.argv.slice(2).find((a) => !a.startsWith('--')) ?? 'sample-repo');
@@ -18,6 +18,10 @@ writeFileSync(join(dir, 'package.json'), JSON.stringify({
 writeFileSync(join(dir, 'tsconfig.json'), JSON.stringify({ compilerOptions: { target: 'ES2022', module: 'NodeNext', moduleResolution: 'NodeNext', strict: true, noEmit: true, types: ['node'] }, include: ['src', 'test'] }, null, 2));
 // --strict-lint: no-console とテンプレートリテラル禁止を error にする（Phase 2「検証失敗 → 修正」シナリオ用）
 const strictLint = process.argv.includes('--strict-lint');
+// --pm npm|yarn|pnpm: lockfile を作るパッケージマネージャ（v0.3、D-44。既定は pnpm）
+const pmArgIndex = process.argv.indexOf('--pm');
+const pm = pmArgIndex >= 0 ? process.argv[pmArgIndex + 1] : 'pnpm';
+if (!['pnpm', 'npm', 'yarn'].includes(pm)) throw new Error(`--pm は pnpm | npm | yarn: ${pm}`);
 writeFileSync(
   join(dir, 'eslint.config.js'),
   strictLint
@@ -44,8 +48,24 @@ writeFileSync(
 writeFileSync(join(dir, 'docs', 'API.md'), '<!-- 自動生成: scripts/gen-api-docs.mjs（pnpm run docs:api）。手で編集しない -->\n\n# API\n\n- `greet(name: string): string` — src/greet.ts\n');
 writeFileSync(join(dir, '.gitignore'), 'node_modules/\n');
 // Windows の pnpm は .cmd シムなので shell 経由で起動する（テスト用フィクスチャ。引数は固定）
-const run = (cmd, args) => execFileSync(cmd, args, { cwd: dir, stdio: 'inherit', shell: cmd.endsWith('.cmd') });
-run(process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm', ['install', '--lockfile-only']);
+// corepack / yarn 1.22 が packageManager を自動で書き込まないようにする（ホストの npm_config_user_agent を拾って壊れた値になる）
+const env = { ...process.env, COREPACK_ENABLE_AUTO_PIN: '0', COREPACK_ENABLE_STRICT: '0', YARN_ENABLE_GLOBAL_CACHE: '1' };
+delete env.npm_config_user_agent;
+const run = (cmd, args) => execFileSync(cmd, args, { cwd: dir, stdio: 'inherit', shell: cmd.endsWith('.cmd'), env });
+const win = process.platform === 'win32';
+if (pm === 'pnpm') run(win ? 'pnpm.cmd' : 'pnpm', ['install', '--lockfile-only']);
+else if (pm === 'npm') run(win ? 'npm.cmd' : 'npm', ['install', '--package-lock-only', '--ignore-scripts', '--no-audit', '--no-fund']);
+else {
+  // yarn 1.22.22 は yarn.lock が見つかるまで親ディレクトリを辿り、このリポジトリの package.json（packageManager: pnpm）を拾って拒否する。
+  // 空の yarn.lock を先に置いてサンプルをプロジェクトルートにする（install が正しい内容で上書きする）
+  writeFileSync(join(dir, 'yarn.lock'), '');
+  run(win ? 'npx.cmd' : 'npx', ['-y', 'yarn@1.22.22', 'install', '--ignore-scripts', '--non-interactive']); // yarn 1 は lockfile だけの生成ができないため node_modules も作る（.gitignore 済み）
+}
+// 念のため packageManager を取り除く（サンドボックスは lockfile で判定する）
+const pkgPath = join(dir, 'package.json');
+const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
+delete pkg.packageManager;
+writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n');
 run('git', ['init', '-q', '-b', 'main']);
 run('git', ['add', '-A']);
 run('git', ['-c', 'user.email=sample@example.com', '-c', 'user.name=sample', 'commit', '-q', '-m', 'init']);

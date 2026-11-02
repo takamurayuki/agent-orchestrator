@@ -8,7 +8,7 @@ import { maskSecrets } from './masking.js';
  * - 設定・検証・CI・コンテナ定義など「影響範囲が広いファイル」への予想外の変更は 1 件でも major
  * - それ以外は予想外が 3 件以上で major、1〜2 件は minor（記録のみ）
  */
-const SENSITIVE_RE = /(^|\/)(package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|\.npmrc|tsconfig(\.[^/]+)?\.json|eslint\.config\.[cm]?[jt]s|\.eslintrc[^/]*|vitest\.config\.[cm]?[jt]s|jest\.config\.[cm]?[jt]s|playwright\.config\.[cm]?[jt]s|vite\.config\.[cm]?[jt]s|Dockerfile|docker-compose\.[^/]+|\.github\/.*|\.agent-orchestrator\/.*|docker\/.*|\.env.*)$/i;
+const SENSITIVE_RE = /(^|\/)(package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|\.yarnrc(\.yml)?|\.npmrc|tsconfig(\.[^/]+)?\.json|eslint\.config\.[cm]?[jt]s|\.eslintrc[^/]*|vitest\.config\.[cm]?[jt]s|jest\.config\.[cm]?[jt]s|playwright\.config\.[cm]?[jt]s|vite\.config\.[cm]?[jt]s|Dockerfile|docker-compose\.[^/]+|\.github\/.*|\.agent-orchestrator\/.*|docker\/.*|\.env.*)$/i;
 
 export const MAJOR_UNEXPECTED_THRESHOLD = 3;
 

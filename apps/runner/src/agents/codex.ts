@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { loadJsonSchema, validateReview, type ReviewOutcome } from '@agent-orchestrator/contracts';
 import type { ReviewerInput } from '../engine.js';
 import { excerpt } from '../masking.js';
+import { runScriptArgv } from '../verification/profiles.js';
 import { CONTAINER_AUX, CONTAINER_WORKSPACE, type SandboxExecutor } from '../isolation/types.js';
 import { assertNoForbiddenFlags } from '../policy.js';
 import type { ProcessResult } from '../process-runner.js';
@@ -60,7 +61,7 @@ export function renderReviewerPrompt(input: ReviewerInput): string {
   if (t.expectedChanges && t.expectedChanges.length > 0) lines.push('', '## Expected scope (from the approved task)', ...t.expectedChanges.map((e) => `- ${e}`));
   if (t.conflictRisks && t.conflictRisks.length > 0) lines.push('', '## Known conflict risks (from the approved task)', ...t.conflictRisks.map((c) => `- ${c}`));
   if (input.scopeCheck && input.scopeCheck.severity !== 'none') lines.push('', '## Scope check by the orchestrator', `- ${input.scopeCheck.severity}: ${input.scopeCheck.detail}`);
-  if (t.generatedArtifacts && t.generatedArtifacts.length > 0) lines.push('', '## Generated artifacts (already regenerated and compared by the verifier; see generate:* results — do not ask for regeneration)', ...t.generatedArtifacts.map((g) => `- ${g.path} ← pnpm run ${g.script}${g.inputStatus === 'missing' ? ' (its inputs are not in the repository: the verifier confirms freshness only, content validity is unverified by design and was accepted by the user before approval)' : ''}`));
+  if (t.generatedArtifacts && t.generatedArtifacts.length > 0) lines.push('', '## Generated artifacts (already regenerated and compared by the verifier; see generate:* results — do not ask for regeneration)', ...t.generatedArtifacts.map((g) => `- ${g.path} ← ${runScriptArgv(t.verificationProfile, g.script).join(' ')}${g.inputStatus === 'missing' ? ' (its inputs are not in the repository: the verifier confirms freshness only, content validity is unverified by design and was accepted by the user before approval)' : ''}`));
   lines.push('', '## Verification results (already executed by the orchestrator)');
   for (const c of input.verification.commands) lines.push(`- ${c.name}: exit=${c.exitCode ?? 'null'}${c.timedOut ? ' TIMEOUT' : ''}`);
   lines.push('', '## Changed files (including untracked)');

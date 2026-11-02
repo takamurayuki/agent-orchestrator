@@ -37,7 +37,9 @@ export const DEFAULT_EGRESS_ALLOWLIST = [
   'api.openai.com',
   'chatgpt.com',
   'auth.openai.com',
-  'registry.npmjs.org'
+  'registry.npmjs.org',
+  // Yarn 1 の lockfile は registry.yarnpkg.com（npm レジストリのミラー）を参照する（v0.3、D-44）
+  'registry.yarnpkg.com'
 ];
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): RunnerConfig {

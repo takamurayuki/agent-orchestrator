@@ -206,8 +206,8 @@ export function diagnoseBaselineFailure(commands: ReadonlyArray<{ name: string; 
     if (/ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION|minimumReleaseAge/.test(out)) {
       return 'pnpm のサプライチェーンポリシー（minimumReleaseAge）により、公開から間もない依存パッケージのインストールが拒否されました。プロジェクトの pnpm 設定（pnpm-workspace.yaml の minimumReleaseAge / minimumReleaseAgeExclude）を見直すか、時間をおいて再実行してください。AI は実行していません';
     }
-    if (/ERR_PNPM_OUTDATED_LOCKFILE|frozen-lockfile|lockfile is not up to date/i.test(out)) {
-      return 'pnpm-lock.yaml が package.json と一致しません。プロジェクト側で pnpm install を実行してロックファイルを更新・コミットしてから再実行してください。AI は実行していません';
+    if (/ERR_PNPM_OUTDATED_LOCKFILE|frozen-lockfile|lockfile is not up to date|npm ci.*can only install|not in sync|Missing: .* from lock file|lockfile needs to be updated|Your lockfile needs to be updated/i.test(out)) {
+      return 'lockfile（pnpm-lock.yaml / package-lock.json / yarn.lock）が package.json と一致しません。プロジェクト側でパッケージマネージャの install を実行してロックファイルを更新・コミットしてから再実行してください。AI は実行していません';
     }
     if (/ENOTFOUND|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|403 Forbidden|getaddrinfo/i.test(out)) {
       return `依存パッケージの取得で通信エラーが発生しました（${c.name}）。ネットワークとレジストリ（registry.npmjs.org）への到達性を確認して再実行してください。allowlist 外のレジストリは遮断されます。AI は実行していません`;

@@ -615,7 +615,9 @@ export const EMBEDDED_SCHEMAS: Record<string, Record<string, unknown>> = {
       },
       "verificationProfile": {
         "enum": [
-          "node-pnpm"
+          "node-pnpm",
+          "node-npm",
+          "node-yarn"
         ]
       },
       "limits": {

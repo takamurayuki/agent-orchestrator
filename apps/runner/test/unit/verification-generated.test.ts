@@ -56,6 +56,16 @@ describe('generated artifact verification (D-41)', () => {
     expect(r[0]!.stdoutExcerpt).toContain('test-results/dogfood');
   });
 
+  it('runs the generator with the package manager of the profile (npm / yarn)', async () => {
+    const sb = sandboxWith({ before: 'a', after: 'a' });
+    const r = await verifyGeneratedArtifacts(sb, { ...input(), profile: 'node-npm' });
+    expect(r[0]!.argv).toEqual(['npm', 'run', 'quality:report']);
+    expect(sb.steps.find((s) => s.name.startsWith('generate-quality'))!.argv).toEqual(['npm', 'run', 'quality:report']);
+    const yb = sandboxWith({ before: 'a', after: 'a' });
+    await verifyGeneratedArtifacts(yb, { ...input(), profile: 'node-yarn' });
+    expect(yb.steps.find((s) => s.name.startsWith('generate-quality'))!.argv).toEqual(['yarn', 'run', 'quality:report']);
+  });
+
   it('fails with a plain-language reason when the artifact is stale (Builder did not regenerate)', async () => {
     const r = await verifyGeneratedArtifacts(sandboxWith({ before: 'aaa', after: 'bbb' }), input());
     expect(r[0]!.exitCode).toBe(1);

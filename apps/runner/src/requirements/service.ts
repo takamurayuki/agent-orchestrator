@@ -1,6 +1,6 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { CONTRADICTION_QUESTION_PREFIX, type AskedQuestion, type DraftApproveResult, type DraftState, type DraftView, type Fact, type ProjectInfo, type TaskProposal } from '@agent-orchestrator/contracts';
+import { CONTRADICTION_QUESTION_PREFIX, VERIFICATION_PROFILES, type AskedQuestion, type DraftApproveResult, type DraftState, type DraftView, type Fact, type ProjectInfo, type TaskProposal, type VerificationProfileName } from '@agent-orchestrator/contracts';
 import { nowIso } from '../config.js';
 import { detectProhibitedOperations } from '../policy.js';
 import type { Repository, DraftRow } from '../storage/repository.js';
@@ -332,9 +332,10 @@ export class DraftService {
     const baseRef = info?.defaultBaseRef ?? info?.currentBranch ?? 'HEAD';
     const previous = this.deps.repo.listRevisions(draft.id).find((r) => r.taskYaml);
     const previousTaskId = previous?.taskYaml ? parseAndValidateTaskYaml(previous.taskYaml) : null;
-    const generated = generateTask({ proposal, repository, baseRef, verificationProfile: 'node-pnpm', ...(previousTaskId?.ok ? { taskId: previousTaskId.task.id } : {}) });
+    const profileName = (VERIFICATION_PROFILES as readonly string[]).includes(info?.verificationProfile?.name ?? '') ? (info!.verificationProfile!.name as VerificationProfileName) : 'node-pnpm';
+    const generated = generateTask({ proposal, repository, baseRef, verificationProfile: profileName, ...(previousTaskId?.ok ? { taskId: previousTaskId.task.id } : {}) });
     const readiness = info?.verificationProfile?.ready ?? false;
-    const errors = [...(generated.ok ? [] : generated.errors), ...(readiness ? [] : [`検証プロファイル node-pnpm を実行できません: ${info?.verificationProfile?.missingScripts.length ? `scripts 不足 ${info.verificationProfile.missingScripts.join(', ')}` : 'package.json / pnpm-lock.yaml を確認してください'}`])];
+    const errors = [...(generated.ok ? [] : generated.errors), ...(readiness ? [] : [`検証プロファイル ${profileName} を実行できません: ${info?.verificationProfile?.missingScripts.length ? `scripts 不足 ${info.verificationProfile.missingScripts.join(', ')}` : 'package.json と lockfile（pnpm / npm / yarn 1）を確認してください'}`])];
     this.deps.repo.updateRevision(draft.id, revision, { proposal, taskYaml: generated.yaml, validationErrors: errors });
     const state: DraftState = errors.length === 0 ? 'AWAITING_APPROVAL' : 'SUMMARY_READY';
     return this.deps.repo.updateDraft(draft.id, { state, currentRevision: revision });
